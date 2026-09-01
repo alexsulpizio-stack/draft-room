@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ChevronLeft,
   ClipboardPaste,
@@ -20,7 +20,6 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
 import {
   Dialog,
@@ -28,7 +27,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -62,14 +60,34 @@ type Persisted = {
   importText?: string;
 };
 
-function loadState(): Partial<Persisted> {
-  if (typeof window === "undefined") return {};
+const EMPTY: Persisted = {
+  settings: DEFAULT_SETTINGS,
+  picks: [],
+  stars: [],
+  avoids: [],
+};
+
+function readRaw() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Persisted) : {};
+    return localStorage.getItem(STORAGE_KEY) ?? JSON.stringify(EMPTY);
   } catch {
-    return {};
+    return JSON.stringify(EMPTY);
   }
+}
+
+function subscribe(cb: () => void) {
+  const onChange = () => cb();
+  window.addEventListener("storage", onChange);
+  window.addEventListener("draft-room", onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener("draft-room", onChange);
+  };
+}
+
+function writeStore(next: Persisted) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event("draft-room"));
 }
 
 function posFilterList(): Array<Position | "ALL"> {
@@ -77,10 +95,37 @@ function posFilterList(): Array<Position | "ALL"> {
 }
 
 export function DraftApp() {
-  const saved = loadState();
-  const [settings, setSettings] = useState<LeagueSettings>(saved.settings ?? DEFAULT_SETTINGS);
-  const [picks, setPicks] = useState<DraftPick[]>(saved.picks ?? []);
-  const [stars, setStars] = useState<string[]>(saved.stars ?? []);
+  const raw = useSyncExternalStore(subscribe, readRaw, () => JSON.stringify(EMPTY));
+  const data: Persisted = useMemo(() => {
+    try {
+      return { ...EMPTY, ...(JSON.parse(raw) as Persisted) };
+    } catch {
+      return EMPTY;
+    }
+  }, [raw]);
+  const settings = data.settings ?? DEFAULT_SETTINGS;
+  const picks = data.picks ?? EMPTY.picks;
+  const stars = data.stars ?? EMPTY.stars;
+
+  const setSettings = useCallback(
+    (next: LeagueSettings) => writeStore({ ...data, settings: next }),
+    [data]
+  );
+  const setPicks = useCallback(
+    (next: DraftPick[] | ((prev: DraftPick[]) => DraftPick[])) => {
+      const picksNext = typeof next === "function" ? next(data.picks ?? EMPTY.picks) : next;
+      writeStore({ ...data, picks: picksNext });
+    },
+    [data]
+  );
+  const setStars = useCallback(
+    (next: string[] | ((prev: string[]) => string[])) => {
+      const starsNext = typeof next === "function" ? next(data.stars ?? EMPTY.stars) : next;
+      writeStore({ ...data, stars: starsNext });
+    },
+    [data]
+  );
+
   const [query, setQuery] = useState("");
   const [posFilter, setPosFilter] = useState<Position | "ALL">("ALL");
   const [showTaken, setShowTaken] = useState(false);
@@ -89,11 +134,6 @@ export function DraftApp() {
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Player[] | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const payload: Persisted = { settings, picks, stars, avoids: [] };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [settings, picks, stars]);
 
   const board = overrides ?? PLAYERS;
   const overall = picks.length + 1;
@@ -154,7 +194,7 @@ export function DraftApp() {
       setPicks((prev) => [...prev, { overall: prev.length + 1, team, playerId }]);
       setQuery("");
     },
-    [onClock, taken, done]
+    [onClock, taken, done, setPicks]
   );
 
   const undo = () => setPicks((prev) => prev.slice(0, -1));
@@ -260,7 +300,7 @@ export function DraftApp() {
       </header>
 
       <main className="mx-auto grid w-full max-w-[1600px] flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)_minmax(280px,0.7fr)]">
-        <section className="flex min-h-0 flex-col rounded-2xl border border-white/8 bg-card/60">
+        <section className="order-3 flex min-h-0 flex-col rounded-2xl border border-white/8 bg-card/60 lg:order-1">
           <div className="flex flex-col gap-3 border-b border-white/8 p-3 sm:flex-row sm:items-center">
             <Input
               ref={searchRef}
@@ -380,7 +420,7 @@ export function DraftApp() {
           </div>
         </section>
 
-        <section className="flex flex-col gap-4">
+        <section className="order-1 flex flex-col gap-4 lg:order-2">
           <div className="rounded-2xl border border-white/8 bg-card/70 p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="font-display text-lg tracking-wide">
@@ -435,7 +475,7 @@ export function DraftApp() {
           <RosterCard roster={myRoster} needs={needs} />
         </section>
 
-        <section className="flex flex-col gap-4">
+        <section className="order-2 flex flex-col gap-4 lg:order-3">
           <Tabs defaultValue="log">
             <TabsList className="w-full">
               <TabsTrigger value="log">Picks</TabsTrigger>
@@ -748,11 +788,18 @@ function SettingsSheet({
   settings: LeagueSettings;
   setSettings: (s: LeagueSettings) => void;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <Sheet>
-      <SheetTrigger render={<Button variant="outline" size="sm" />}>
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Settings2 /> League
-      </SheetTrigger>
+      </Button>
+      <Sheet
+        open={open}
+        onOpenChange={(next) => {
+          if (typeof next === "boolean") setOpen(next);
+        }}
+      >
       <SheetContent className="overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle>League setup</SheetTitle>
@@ -844,6 +891,7 @@ function SettingsSheet({
         </div>
       </SheetContent>
     </Sheet>
+    </>
   );
 }
 
@@ -870,10 +918,16 @@ function ImportDialog({
   onApply: () => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+    <>
+      <Button variant="outline" size="sm" onClick={() => onOpenChange(true)}>
         <ClipboardPaste /> Import
-      </DialogTrigger>
+      </Button>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (typeof next === "boolean") onOpenChange(next);
+        }}
+      >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Paste FantasyPros rankings</DialogTitle>
@@ -892,5 +946,6 @@ function ImportDialog({
         </Button>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
