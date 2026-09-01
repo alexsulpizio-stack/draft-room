@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ingestCorsHeaders, type EspnRawPick } from "@/lib/espn";
+import { ingestCorsHeaders, parseEspnPickLog, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  let body: { picks?: unknown; href?: string; title?: string; ts?: number } = {};
+  let body: { picks?: unknown; href?: string; title?: string; ts?: number; text?: string } = {};
   const ct = req.headers.get("content-type") ?? "";
   try {
     if (ct.includes("application/json")) {
@@ -51,7 +51,14 @@ export async function POST(req: Request) {
   } catch {
     return cors(req, { ok: false, error: "Invalid JSON." }, 400);
   }
-  const picks = normalizePicks(body.picks);
+  let picks = normalizePicks(body.picks);
+  if (!picks.length && typeof body.text === "string" && body.text.trim()) {
+    picks = parseEspnPickLog(body.text);
+  }
+  const previous = getIngest();
+  if (!picks.length && previous?.picks.length) {
+    return cors(req, { ok: true, count: previous.picks.length, ignoredEmpty: true });
+  }
   setIngest({
     picks,
     href: typeof body.href === "string" ? body.href : undefined,

@@ -32,9 +32,14 @@ Open [http://localhost:43173](http://localhost:43173) in Chrome on a computer. K
 
 ## ESPN live sync
 
-The league is private. Open **ESPN**, confirm league ID `1361349772`, paste `SWID` and `espn_s2` from fantasy.espn.com cookies, and Connect. You are already set to **JackAL, pick 5**.
+Two steps. No cookies.
 
-ESPN's `mDraftDetail` often stays empty until the draft ends. Drag **Sync Draft Room** to your bookmarks bar and click it on the live draft tab so picks still stream in.
+1. Drag the green **Sync ESPN** chip onto the Chrome bookmarks bar (Ctrl+Shift+B if the bar is hidden).
+2. Open the ESPN draft tab and click that bookmark. Leave the tab open.
+
+Draft Room listens in the background and fills the board as picks come in. Click the chip in Draft Room anytime for this reminder.
+
+Cookies and a pasted pick log still exist under **Show cookies & paste** if a browser blocks the bookmark. You are already set to **JackAL, pick 5**.
 
 ## How to draft this format
 

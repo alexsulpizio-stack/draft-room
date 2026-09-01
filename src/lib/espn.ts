@@ -5,6 +5,7 @@ import type { DraftType, LeagueSettings, Player, Position, Scoring } from "./typ
 import { DEFAULT_SETTINGS } from "./types";
 
 export const ESPN_API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
+export const ESPN_FANTASY_ORIGIN = "https://fantasy.espn.com";
 
 /** ESPN proTeamId → NFL abbreviation. */
 export const PRO_TEAM: Record<number, string> = {
@@ -603,9 +604,10 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
   return picks;
 }
 
-export function buildBookmarklet(origin: string): string {
+export function buildBookmarklet(origin: string, teams = 12): string {
   const code = `(function(){
 var O=${JSON.stringify(origin.replace(/\/$/, ""))};
+var T=${Number(teams) || 12};
 function walk(root,d,out,seen){
   if(!root||d>18)return out;
   if(Array.isArray(root)){
@@ -661,38 +663,66 @@ function fromFiber(){
       if(window[k]) walk(window[k],0,out,seen);
     });
   }catch(e){}
-  out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
   return out;
+}
+function fromDom(out,seen){
+  var text=document.body.innerText||"";
+  var re=/(?:^|\\n)\\s*(\\d{1,2})\\.(\\d{2})\\s+([A-Z][A-Za-z.'\\- ]{2,40})/g;
+  var m,i=0;
+  while((m=re.exec(text))&&i++<220){
+    var overall=(Number(m[1])-1)*T+Number(m[2]);
+    push({overallPickNumber:overall,playerId:0,teamId:0,playerName:m[3].replace(/\\s+/g," ").trim()},out,seen);
+  }
+  document.querySelectorAll("[data-player-id],[data-playerid]").forEach(function(el){
+    var id=Number(el.getAttribute("data-player-id")||el.getAttribute("data-playerid")||0);
+    var name=(el.textContent||"").trim().split("\\n")[0];
+    if(!id&&!name)return;
+    push({overallPickNumber:out.length+1,playerId:id,teamId:0,playerName:name},out,seen);
+  });
+}
+function collect(){
+  var seen={},out=fromFiber();
+  fromDom(out,seen);
+  var seen2={};
+  var uniq=[];
+  out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
+  out.forEach(function(p){
+    if(seen2[p.overallPickNumber]){
+      if(p.playerId&&!seen2[p.overallPickNumber].playerId) seen2[p.overallPickNumber]=p;
+      return;
+    }
+    seen2[p.overallPickNumber]=p;
+  });
+  Object.keys(seen2).forEach(function(k){uniq.push(seen2[k]);});
+  uniq.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
+  return uniq;
 }
 function badge(n,err){
   var b=document.getElementById("draft-room-sync");
   if(!b){
     b=document.createElement("div");
     b.id="draft-room-sync";
-    b.style.cssText="position:fixed;bottom:12px;left:12px;z-index:2147483647;background:#163;color:#d9f5e3;padding:8px 12px;border-radius:10px;font:12px/1.3 system-ui,sans-serif;box-shadow:0 8px 24px #0008";
+    b.style.cssText="position:fixed;bottom:16px;left:16px;z-index:2147483647;background:#1f6a45;color:#fff;padding:10px 14px;border-radius:12px;font:13px/1.35 system-ui,sans-serif;box-shadow:0 8px 24px #0005";
     document.body.appendChild(b);
   }
-  b.style.background=err?"#622":"#163";
-  b.textContent=err?("Draft Room · "+err):("Draft Room live · "+n+" picks — keep this tab open");
+  b.style.background=err?"#9b1c1c":"#1f6a45";
+  b.textContent=err?("Draft Room · "+err):("Draft Room is syncing · "+n+" picks. Leave this tab open.");
 }
 function send(picks){
+  if(!picks||!picks.length){ badge(0); return; }
   var body=JSON.stringify({picks:picks,href:location.href,title:document.title,ts:Date.now()});
   return fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:body,mode:"cors"}).then(function(r){
     if(!r.ok) throw new Error("HTTP "+r.status);
     badge(picks.length);
   }).catch(function(e){
+    try{navigator.sendBeacon(O+"/api/espn/ingest",new Blob([body],{type:"application/json"}));}catch(e2){}
     badge(picks.length,String(e.message||e));
   });
 }
-var last=0;
-function tick(){
-  var picks=fromFiber();
-  if(picks.length!==last || picks.length===0){ last=picks.length; send(picks); }
-  else send(picks);
-}
+function tick(){ send(collect()); }
 tick();
 if(!window.__draftRoomEspn){
-  window.__draftRoomEspn=setInterval(tick,2000);
+  window.__draftRoomEspn=setInterval(tick,1500);
 }
 badge(0);
 })();`;
