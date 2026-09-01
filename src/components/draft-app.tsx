@@ -633,7 +633,8 @@ function ClockBadge({
       <span className="text-xs">
         {isUserPick ? "Your pick" : `${teamLabel ?? `Team ${onClock}`}'s pick`}
         {!isUserPick && nextMine ? ` · ${untilUser} until you` : ""}
-        <span className="ml-1 text-muted-foreground">
+        <span className="text-muted-foreground">
+          {" "}
           ({youLabel ?? `you are ${slot}`})
         </span>
       </span>
