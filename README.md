@@ -1,8 +1,8 @@
 # Draft Room
 
-A live 2026 fantasy football draft companion that sits between **FantasyPros** and **DraftSharks**, and stays in sync with an **ESPN** room.
+A desktop 2026 fantasy football draft companion that sits between **FantasyPros** and **DraftSharks**, and stays in sync with an **ESPN** room.
 
-Use it on your laptop or phone Wednesday while the room is picking. It blends public FantasyPros ECR with DraftSharks 3D-style ranks, flags where those two boards disagree, and tells you who to take **on the clock** given your roster holes.
+Built for a laptop or monitor on draft night — not a phone. It blends public FantasyPros ECR with DraftSharks 3D-style ranks, flags where those two boards disagree, and tells you who to take **on the clock** given your roster holes.
 
 Rankings are a **September 1, 2026 snapshot**. Paste your latest FantasyPros cheat sheet before you draft if you want the overlay refreshed.
 
@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:43173](http://localhost:43173).
+Open [http://localhost:43173](http://localhost:43173) in a desktop browser (Chrome or Edge). Keep ESPN in another tab.
 
 ## ESPN live sync
 
@@ -36,7 +36,7 @@ Cookies never go into git. They live in `localStorage` on this machine.
 
 ## On the clock
 
-- Search a name, tap **Draft** on your pick or **Taken** on everyone else. While ESPN is connected, the room overwrites local clicks on the next poll.
+- Search a name, click **Draft** on your pick or **Taken** on everyone else. While ESPN is connected, the room overwrites local clicks on the next poll.
 - The middle column ranks six names with *why* (need, ADP fall, DS vs FP gap, positional cliff).
 - Star players you want. **FP vs DS** is the disagreement board — that is the whole reason to use both sites.
 - **Undo** and **Reset** if you misclick. State is saved in the browser.

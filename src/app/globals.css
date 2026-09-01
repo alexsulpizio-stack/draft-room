@@ -133,6 +133,11 @@
   html {
     @apply font-sans;
   }
+  html,
+  body {
+    min-width: 1280px;
+    height: 100%;
+  }
   .font-display {
     font-family: var(--font-display), "Barlow Condensed", sans-serif;
   }

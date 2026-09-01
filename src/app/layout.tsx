@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -21,7 +21,13 @@ const display = Barlow_Condensed({
 export const metadata: Metadata = {
   title: "Draft Room · FantasyPros × DraftSharks",
   description:
-    "Live 2026 fantasy football draft companion. Sync ESPN drafts, blend FantasyPros ECR with DraftSharks 3D value, and get on-the-clock picks.",
+    "Desktop 2026 fantasy football draft companion. Sync ESPN drafts, blend FantasyPros ECR with DraftSharks 3D value, and get on-the-clock picks.",
+};
+
+export const viewport: Viewport = {
+  width: 1440,
+  initialScale: 1,
+  minimumScale: 1,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

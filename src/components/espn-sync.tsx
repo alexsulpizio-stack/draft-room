@@ -359,7 +359,7 @@ export function EspnSync({
           if (typeof next === "boolean") setOpen(next);
         }}
       >
-        <SheetContent className="overflow-y-auto sm:max-w-lg">
+        <SheetContent className="w-[480px] overflow-y-auto sm:max-w-[480px]">
           <SheetHeader>
             <SheetTitle>ESPN live draft</SheetTitle>
             <SheetDescription>
