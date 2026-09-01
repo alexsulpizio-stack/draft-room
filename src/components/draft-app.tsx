@@ -51,7 +51,7 @@ import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 
-const STORAGE_KEY = "draft-room-2026";
+const STORAGE_KEY = "draft-room-jfl-28";
 
 type Persisted = {
   settings: LeagueSettings;
@@ -93,8 +93,11 @@ function writeStore(next: Persisted) {
   window.dispatchEvent(new Event("draft-room"));
 }
 
-function posFilterList(): Array<Position | "ALL"> {
-  return ["ALL", "QB", "RB", "WR", "TE", "K", "DST"];
+function posFilterList(settings: LeagueSettings): Array<Position | "ALL"> {
+  const list: Array<Position | "ALL"> = ["ALL", "QB", "RB", "WR", "TE"];
+  if (settings.roster.k > 0) list.push("K");
+  if (settings.roster.dst > 0) list.push("DST");
+  return list;
 }
 
 export function DraftApp() {
@@ -205,6 +208,7 @@ export function DraftApp() {
   const sortedBoard = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...board]
+      .filter((p) => (settings.roster.dst === 0 ? p.pos !== "DST" : true))
       .filter((p) => (posFilter === "ALL" ? true : p.pos === posFilter))
       .filter((p) => (showTaken ? true : !taken.has(p.id)))
       .filter((p) =>
@@ -215,7 +219,7 @@ export function DraftApp() {
           : true
       )
       .sort((a, b) => blendedRank(a, settings.dsWeight) - blendedRank(b, settings.dsWeight));
-  }, [board, posFilter, showTaken, taken, query, settings.dsWeight]);
+  }, [board, posFilter, showTaken, taken, query, settings.dsWeight, settings.roster.dst]);
 
   const draftPlayer = useCallback(
     (playerId: string, team = onClock) => {
@@ -291,9 +295,11 @@ export function DraftApp() {
               DS
             </div>
             <div>
-              <p className="font-display text-xl leading-none tracking-wide">Draft Room</p>
+              <p className="font-display text-xl leading-none tracking-wide">
+                {settings.leagueName || "Draft Room"}
+              </p>
               <p className="text-[11px] text-muted-foreground">
-                FantasyPros × DraftSharks · Sept 1, 2026 snapshot
+                Half PPR · 3 WR · RB/WR · no D/ST · snake Thu 9/3 7:00 PM
               </p>
             </div>
           </div>
@@ -382,7 +388,7 @@ export function DraftApp() {
               }}
             />
             <div className="flex shrink-0 gap-1">
-              {posFilterList().map((p) => (
+              {posFilterList(settings).map((p) => (
                 <button
                   key={p}
                   type="button"
@@ -647,6 +653,7 @@ function RosterCard({
         <div className="space-y-3">
           {groups.map((pos) => {
             const here = roster.filter((p) => p.pos === pos);
+            if (pos === "DST" && needs.holes.DST === 0 && here.length === 0) return null;
             if (here.length === 0 && needs.holes[pos] === 0 && pos !== "QB" && pos !== "RB" && pos !== "WR" && pos !== "TE") {
               return null;
             }
@@ -677,6 +684,9 @@ function RosterCard({
               </div>
             );
           })}
+          {needs.rbwrHole > 0 ? (
+            <p className="text-xs text-gold">RB/WR slot still open.</p>
+          ) : null}
           {needs.flexHole > 0 ? (
             <p className="text-xs text-gold">FLEX still open.</p>
           ) : null}
@@ -800,28 +810,26 @@ function PlanCard({
   return (
     <div className="space-y-3 rounded-xl border border-white/8 p-3 text-sm">
       <p>
-        You are pick <span className="font-semibold text-primary">{slot}</span> in a {settings.teams}-team{" "}
-        {settings.scoring.toUpperCase()} {settings.superflex ? "Superflex" : "1QB"}{" "}
-        {settings.draftType === "linear" ? "linear" : "snake"}.
+        You are pick <span className="font-semibold text-primary">{slot}</span> in{" "}
+        <span className="font-semibold text-primary">{settings.leagueName}</span> — 12-team half PPR
+        snake, 3 WR, 1 RB, RB/WR, kicker, no D/ST. Draft Thu Sep 3 at 7:00 PM EDT, 90-second clock.
       </p>
       <ul className="space-y-2 text-muted-foreground">
         <li>
           {early
-            ? "Lock Gibbs / Bijan / Chase. Do not overthink 1.01–1.03. Nacua is the DS smash if the room panics to RB."
+            ? "This is a 3-WR league. Chase / Nacua / JSN / ARSB go over a mid-RB at 1.01–1.03 unless Gibbs or Bijan is there. Do not take a QB or TE in the first two."
             : late
-              ? "The 1/2 turn is the whole draft. If Nacua, JSN, or ARSB slides, take the WR. If not, Cook / Achane / Hampton, then smash Walker, AJ Brown, or London coming back."
-              : "Middle slots should take the last elite WR/RB and hunt Walker, AJ Brown, London, and Nico on the 2/3 turn — that's where FP and DS both find value."}
+              ? "The 1/2 turn is the draft. If Nacua, JSN, or ARSB slides, take the WR — you start three of them. If not, Cook / Achane / Hampton, then smash a WR coming back."
+              : "Middle slots: take the last elite WR, then hunt Walker, AJ Brown, London, and Nico on the 2/3 turn. You only start one dedicated RB plus an RB/WR."}
         </li>
         <li>
-          {settings.superflex
-            ? "Superflex: Josh Allen is a top-8 pick. Lamar/Maye belong in the 2nd. Do not leave the 4th without two QBs."
-            : "1QB: wait on quarterback unless Allen falls to the 4th. DS ranks him #24 — that's a reach over Rice/McBride."}
+          RB/WR is not full FLEX — TE cannot go there. Get one workhorse RB, then fill the combo with a WR if the board is WR-heavy.
         </li>
         <li>
-          Tight end: Bowers or McBride through round 3. After that, Loveland/Warren/Kraft and stop thinking about it.
+          1QB, wait unless Allen falls to the 4th. TE: Bowers or McBride through round 3, then Loveland / Warren / Kraft. Never draft a D/ST. Kicker in the last round.
         </li>
         <li>
-          Wednesday news to confirm before you click: Jeanty&apos;s leg, Nabers&apos; workload, Egbuka&apos;s toe, Love&apos;s ankle, Kraft practicing, Kamara (out).
+          First downs pay 0.25, so volume RBs and chain-moving WRs tick up versus boom-only guys. Confirm before Thursday: Jeanty&apos;s leg, Nabers&apos; workload, Egbuka&apos;s toe, Love&apos;s ankle, Kraft practicing, Kamara (out).
         </li>
       </ul>
       <div>
@@ -872,25 +880,20 @@ function SettingsSheet({
       >
       <SheetContent className="w-[420px] overflow-y-auto sm:max-w-[420px]">
         <SheetHeader>
-          <SheetTitle>League setup</SheetTitle>
+          <SheetTitle>{settings.leagueName}</SheetTitle>
           <SheetDescription>
-            Match your draft. Rankings stay PPR-based; scoring tilts projections for VOR.
+            Loaded from the ESPN settings PDF. 12-team half PPR snake, 14 rounds, 90 seconds a pick.
+            Draft order is set by the LM — pick your slot.
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-4 px-4 pb-8">
-          <Field label="Teams">
-            <select
-              className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
-              value={settings.teams}
-              onChange={(e) => setSettings({ ...settings, teams: Number(e.target.value) })}
-            >
-              {[8, 10, 12, 14].map((n) => (
-                <option key={n} value={n}>
-                  {n} teams
-                </option>
-              ))}
-            </select>
-          </Field>
+          <div className="rounded-xl border border-white/8 bg-background/40 p-3 text-sm">
+            <p className="font-medium">Starters (8) + 6 bench + 2 IR</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              QB · RB · RB/WR · WR · WR · WR · TE · K. No D/ST. RB/WR is not a full FLEX — TEs cannot
+              play it. First downs are 0.25 rushing and receiving.
+            </p>
+          </div>
           <Field label="Your slot">
             <select
               className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
@@ -920,13 +923,6 @@ function SettingsSheet({
               <option value="standard">Standard</option>
             </select>
           </Field>
-          <label className="flex items-center justify-between gap-3 text-sm">
-            Superflex
-            <Switch
-              checked={settings.superflex}
-              onCheckedChange={(v) => setSettings({ ...settings, superflex: v })}
-            />
-          </label>
           <div>
             <div className="mb-1 flex items-center justify-between text-sm">
               <Label>Trust DraftSharks</Label>

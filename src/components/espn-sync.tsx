@@ -101,7 +101,7 @@ export function EspnSync({
   setStatus: (s: EspnLiveStatus) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [league, setLeague] = useState("");
+  const [league, setLeague] = useState("1361349772");
   const [season, setSeason] = useState(2026);
   const [swid, setSwid] = useState("");
   const [espnS2, setEspnS2] = useState("");
@@ -363,8 +363,9 @@ export function EspnSync({
           <SheetHeader>
             <SheetTitle>ESPN live draft</SheetTitle>
             <SheetDescription>
-              Pull league settings from ESPN and keep this board in lockstep with the room. ESPN&apos;s own
-              API often goes quiet mid-draft — the bookmarklet reads the live page when that happens.
+              JFL 28 is ESPN league 1361349772 (private). Paste SWID and espn_s2, then Connect. During
+              the live room, run the bookmarklet on the ESPN draft tab — mDraftDetail often stays empty
+              until the draft ends.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">
@@ -398,7 +399,7 @@ export function EspnSync({
               <Input
                 value={league}
                 onChange={(e) => setLeague(e.target.value)}
-                placeholder="https://fantasy.espn.com/football/draft?leagueId=…"
+                placeholder="1361349772"
               />
             </label>
             <label className="grid gap-1 text-sm">

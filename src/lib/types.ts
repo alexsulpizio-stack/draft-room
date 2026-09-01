@@ -20,11 +20,14 @@ export interface Player {
 }
 
 export interface LeagueSettings {
+  leagueName: string;
+  espnLeagueId: string;
   teams: number;
   rounds: number;
   slot: number;
   scoring: Scoring;
   superflex: boolean;
+  firstDownBonus: boolean;
   dsWeight: number;
   draftType: DraftType;
   teamNames: string[];
@@ -34,9 +37,11 @@ export interface LeagueSettings {
     wr: number;
     te: number;
     flex: number;
+    rbwr: number;
     k: number;
     dst: number;
     bench: number;
+    ir: number;
   };
 }
 
@@ -53,23 +58,29 @@ export interface Recommendation {
   wait: "now" | "borderline" | "can-wait";
 }
 
+/** JFL 28 on ESPN — leagueId 1361349772. Snake, Thu Sep 3 2026 7:00 PM EDT. */
 export const DEFAULT_SETTINGS: LeagueSettings = {
+  leagueName: "JFL 28",
+  espnLeagueId: "1361349772",
   teams: 12,
-  rounds: 15,
+  rounds: 14,
   slot: 1,
-  scoring: "ppr",
+  scoring: "half",
   superflex: false,
+  firstDownBonus: true,
   dsWeight: 50,
   draftType: "snake",
   teamNames: [],
   roster: {
     qb: 1,
-    rb: 2,
-    wr: 2,
+    rb: 1,
+    wr: 3,
     te: 1,
-    flex: 1,
+    flex: 0,
+    rbwr: 1,
     k: 1,
-    dst: 1,
+    dst: 0,
     bench: 6,
+    ir: 2,
   },
 };

@@ -96,14 +96,21 @@ export function scoringMult(pos: Position, scoring: Scoring) {
 export function adjustedProj(player: Player, settings: LeagueSettings) {
   let pts = player.proj * scoringMult(player.pos, settings.scoring);
   if (settings.superflex && player.pos === "QB") pts *= 1.08;
+  if (settings.firstDownBonus) {
+    if (player.pos === "RB") pts *= 1.05;
+    if (player.pos === "WR") pts *= 1.04;
+    if (player.pos === "TE") pts *= 1.02;
+  }
   return pts;
 }
 
 export function vor(player: Player, settings: LeagueSettings) {
+  const wrStarts = settings.roster.wr + settings.roster.flex + settings.roster.rbwr;
+  const rbStarts = settings.roster.rb + settings.roster.flex + settings.roster.rbwr;
   const repl: Record<Position, number> = {
     QB: settings.superflex ? 255 : 270,
-    RB: 178,
-    WR: 168,
+    RB: rbStarts <= 2 ? 184 : 178,
+    WR: wrStarts >= 3 ? 156 : 168,
     TE: 138,
     K: 120,
     DST: 102,
@@ -144,26 +151,40 @@ export function starterNeeds(roster: Player[], settings: LeagueSettings) {
     K: Math.max(0, r.k - have.K),
     DST: Math.max(0, r.dst - have.DST),
   };
-  const extraRbWrTe = Math.max(0, have.RB - r.rb) + Math.max(0, have.WR - r.wr) + Math.max(0, have.TE - r.te);
-  const flexHole = Math.max(0, r.flex - extraRbWrTe);
-  return { have, holes, flexHole };
+  const extraRb = Math.max(0, have.RB - r.rb);
+  const extraWr = Math.max(0, have.WR - r.wr);
+  const extraTe = Math.max(0, have.TE - r.te);
+  const rbwrFilled = Math.min(r.rbwr, extraRb + extraWr);
+  const leftoverRbWr = extraRb + extraWr - rbwrFilled;
+  const flexHole = Math.max(0, r.flex - (leftoverRbWr + extraTe));
+  const rbwrHole = Math.max(0, r.rbwr - rbwrFilled);
+  return { have, holes, flexHole, rbwrHole };
 }
 
 function needScore(player: Player, roster: Player[], settings: LeagueSettings) {
-  const { have, holes, flexHole } = starterNeeds(roster, settings);
+  const { have, holes, flexHole, rbwrHole } = starterNeeds(roster, settings);
   const starters = settings.roster;
-  if (player.pos === "K" || player.pos === "DST") {
-    if (holes[player.pos] > 0) return 8;
+  if (player.pos === "DST") {
+    if (starters.dst === 0) return -40;
+    if (holes.DST > 0) return 8;
+    return -20;
+  }
+  if (player.pos === "K") {
+    if (starters.k === 0) return -40;
+    if (holes.K > 0) return 8;
     return -20;
   }
   if (holes[player.pos] > 0) return 22;
+  if ((player.pos === "RB" || player.pos === "WR") && rbwrHole > 0) return 16;
   if ((player.pos === "RB" || player.pos === "WR" || player.pos === "TE") && flexHole > 0) {
     return 14;
   }
   if (player.pos === "QB" && have.QB >= starters.qb + (settings.superflex ? 1 : 0)) return -12;
   if (player.pos === "TE" && have.TE >= starters.te + 1) return -8;
-  if (player.pos === "RB" && have.RB >= starters.rb + starters.flex + 2) return -6;
-  if (player.pos === "WR" && have.WR >= starters.wr + starters.flex + 2) return -4;
+  const rbCap = starters.rb + starters.rbwr + starters.flex + 2;
+  const wrCap = starters.wr + starters.rbwr + starters.flex + 2;
+  if (player.pos === "RB" && have.RB >= rbCap) return -6;
+  if (player.pos === "WR" && have.WR >= wrCap) return -4;
   return 4;
 }
 
@@ -173,7 +194,7 @@ function scarcityScore(player: Player, available: Player[]) {
     (p) => (p.fpRank + p.dsRank) / 2 < (player.fpRank + player.dsRank) / 2
   ).length;
   if (player.pos === "RB" && better <= 3) return 10;
-  if (player.pos === "WR" && better <= 4) return 6;
+  if (player.pos === "WR" && better <= 6) return 8;
   if (player.pos === "TE" && better <= 1) return 12;
   if (player.pos === "QB" && better <= 1) return 5;
   return 0;
@@ -191,6 +212,8 @@ export function recommendPicks(args: {
 
   const scored = available
     .filter((p) => {
+      if (p.pos === "DST" && settings.roster.dst === 0) return false;
+      if (p.pos === "K" && settings.roster.k === 0) return false;
       if ((p.pos === "K" || p.pos === "DST") && round < settings.rounds - 1) return false;
       if (p.injury === "out" && round < 11) return false;
       return true;
@@ -225,6 +248,7 @@ export function recommendPicks(args: {
 
       const reasons: string[] = [];
       if (need >= 20) reasons.push(`Fills a starting ${p.pos} hole`);
+      else if (need >= 16) reasons.push("Covers the RB/WR slot");
       else if (need >= 12) reasons.push("Covers FLEX");
       if (value >= 8) reasons.push(`Falling ${Math.round(value)} spots past ADP`);
       if (gap >= 5) reasons.push(`DraftSharks ${gap} spots ahead of FantasyPros`);
@@ -254,18 +278,21 @@ export function autoPickForTeam(args: {
 }): Player | null {
   const { roster, available, settings, overall } = args;
   const round = roundOf(overall, settings.teams);
-  const { holes, flexHole } = starterNeeds(roster, settings);
+  const { holes, flexHole, rbwrHole } = starterNeeds(roster, settings);
 
   const pool = available.filter((p) => {
     if (p.injury === "out") return false;
+    if (p.pos === "DST" && settings.roster.dst === 0) return false;
+    if (p.pos === "K" && settings.roster.k === 0) return false;
     if (p.pos === "K" || p.pos === "DST") return round >= settings.rounds - 1;
     if (p.pos === "QB" && countPos(roster, "QB") >= (settings.superflex ? 2 : 1) + 1) return false;
     return true;
   });
   if (pool.length === 0) return available[0] ?? null;
 
-  const needPos = (["RB", "WR", "TE", "QB"] as Position[]).filter((pos) => holes[pos] > 0);
+  const needPos = (["WR", "RB", "TE", "QB"] as Position[]).filter((pos) => holes[pos] > 0);
   const flexOk = flexHole > 0;
+  const rbwrOk = rbwrHole > 0;
 
   const ranked = [...pool].sort((a, b) => a.adp - b.adp);
   const pickFrom = (list: Player[]) => list.sort((a, b) => a.adp - b.adp)[0];
@@ -276,6 +303,10 @@ export function autoPickForTeam(args: {
   if (needPos.length) {
     const needed = ranked.filter((p) => needPos.includes(p.pos));
     if (needed[0] && needed[0].adp <= overall + 18) return needed[0];
+  }
+  if (rbwrOk) {
+    const combo = ranked.filter((p) => p.pos === "RB" || p.pos === "WR");
+    if (combo[0]) return combo[0];
   }
   if (flexOk) {
     const flex = ranked.filter((p) => p.pos === "RB" || p.pos === "WR" || p.pos === "TE");

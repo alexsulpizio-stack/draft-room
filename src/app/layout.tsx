@@ -21,7 +21,7 @@ const display = Barlow_Condensed({
 export const metadata: Metadata = {
   title: "Draft Room · FantasyPros × DraftSharks",
   description:
-    "Desktop 2026 fantasy football draft companion. Sync ESPN drafts, blend FantasyPros ECR with DraftSharks 3D value, and get on-the-clock picks.",
+    "JFL 28 desktop draft room. Half PPR, 3 WR, ESPN live sync, FantasyPros × DraftSharks.",
 };
 
 export const viewport: Viewport = {

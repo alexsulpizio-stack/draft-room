@@ -288,16 +288,19 @@ function scoringFromItems(items: EspnScoringItem[] | undefined): Scoring {
 }
 
 function rosterFromSlots(counts: Record<string, number> | undefined): LeagueSettings["roster"] {
-  const n = (id: number) => counts?.[String(id)] ?? 0;
+  if (!counts) return { ...DEFAULT_SETTINGS.roster };
+  const n = (id: number) => counts[String(id)] ?? 0;
   return {
     qb: n(0) || DEFAULT_SETTINGS.roster.qb,
-    rb: n(2) || DEFAULT_SETTINGS.roster.rb,
+    rb: n(2),
     wr: n(4) || DEFAULT_SETTINGS.roster.wr,
     te: n(6) || DEFAULT_SETTINGS.roster.te,
-    flex: n(23) || DEFAULT_SETTINGS.roster.flex,
-    k: n(17) || 0,
-    dst: n(16) || 0,
+    flex: n(23),
+    rbwr: n(3),
+    k: n(17),
+    dst: n(16),
     bench: n(20) || DEFAULT_SETTINGS.roster.bench,
+    ir: n(21),
   };
 }
 
@@ -336,7 +339,15 @@ export function parseEspnLeague(
   const size = settingsRaw.size || teams.length || 12;
   const rounds =
     ds.numRounds ||
-    roster.qb + roster.rb + roster.wr + roster.te + roster.flex + roster.k + roster.dst + roster.bench;
+    roster.qb +
+      roster.rb +
+      roster.wr +
+      roster.te +
+      roster.flex +
+      roster.rbwr +
+      roster.k +
+      roster.dst +
+      roster.bench;
 
   let suggestedSlot = 1;
   const swid = (args.swid ?? "").replace(/[{}]/g, "").toLowerCase();
@@ -365,6 +376,8 @@ export function parseEspnLeague(
     suggestedSlot,
     settings: {
       ...DEFAULT_SETTINGS,
+      leagueName: settingsRaw.name || DEFAULT_SETTINGS.leagueName,
+      espnLeagueId: args.leagueId,
       teams: size,
       rounds,
       slot: suggestedSlot,
