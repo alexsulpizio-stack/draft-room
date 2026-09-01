@@ -342,10 +342,8 @@ export function EspnSync({
           setSwid(auth.swid);
           setEspnS2(auth.espnS2);
           const saved = readConn();
-          if (saved?.leagueId) {
-            setLeague(saved.leagueId);
-            setSeason(saved.season);
-          }
+          setLeague(saved?.leagueId || settings.espnLeagueId || "1361349772");
+          setSeason(saved?.season || 2026);
           setOpen(true);
         }}
         className={cn(status.live && "bg-primary text-primary-foreground")}
