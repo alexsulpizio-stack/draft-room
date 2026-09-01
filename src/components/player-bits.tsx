@@ -2,12 +2,12 @@ import { cn } from "@/lib/utils";
 import type { Injury, Player, Position } from "@/lib/types";
 
 export const POS_CLASS: Record<Position, string> = {
-  QB: "bg-violet-500/15 text-violet-300 border-violet-400/25",
-  RB: "bg-sky-500/15 text-sky-300 border-sky-400/25",
-  WR: "bg-emerald-500/15 text-emerald-300 border-emerald-400/25",
-  TE: "bg-amber-500/15 text-amber-300 border-amber-400/25",
-  K: "bg-zinc-500/15 text-zinc-300 border-zinc-400/25",
-  DST: "bg-rose-500/15 text-rose-300 border-rose-400/25",
+  QB: "bg-violet-100 text-violet-800 border-violet-200",
+  RB: "bg-sky-100 text-sky-800 border-sky-200",
+  WR: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  TE: "bg-amber-100 text-amber-800 border-amber-200",
+  K: "bg-zinc-100 text-zinc-700 border-zinc-200",
+  DST: "bg-rose-100 text-rose-800 border-rose-200",
 };
 
 export function PosBadge({ pos }: { pos: Position }) {
@@ -33,7 +33,7 @@ export function GapChip({ fp, ds }: { fp: number; ds: number }) {
     <span
       className={cn(
         "font-mono text-xs font-medium",
-        dsAhead ? "text-gold" : "text-sky-300"
+        dsAhead ? "text-gold" : "text-sky-700"
       )}
     >
       {dsAhead ? "DS" : "FP"} +{Math.abs(gap)}
@@ -46,10 +46,10 @@ export function InjuryDot({ injury }: { injury?: Injury }) {
   const label = injury === "out" ? "OUT" : injury === "questionable" ? "Q" : "Watch";
   const color =
     injury === "out"
-      ? "bg-red-500/20 text-red-300 border-red-500/30"
+      ? "bg-red-100 text-red-800 border-red-200"
       : injury === "questionable"
-        ? "bg-orange-500/20 text-orange-300 border-orange-500/30"
-        : "bg-yellow-500/15 text-yellow-200 border-yellow-500/25";
+        ? "bg-orange-100 text-orange-800 border-orange-200"
+        : "bg-yellow-100 text-yellow-800 border-yellow-200";
   return (
     <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase", color)}>
       {label}

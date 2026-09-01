@@ -290,7 +290,7 @@ export function DraftApp() {
 
   return (
     <div className="flex h-dvh min-w-[1280px] flex-col overflow-hidden">
-      <header className="shrink-0 border-b border-white/8 bg-[#07140e]/95">
+      <header className="shrink-0 border-b border-border bg-card/90 backdrop-blur-sm">
         <div className="flex items-center gap-3 px-5 py-3">
           <div className="flex items-center gap-3">
             <div className="grid size-9 place-items-center rounded-lg bg-primary/15 font-display text-lg tracking-wide text-primary">
@@ -371,19 +371,19 @@ export function DraftApp() {
             </span>
           </p>
         ) : importMsg ? (
-          <p className="border-t border-white/5 px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
+          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
         ) : null}
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.2fr)_400px_340px] gap-4 p-4">
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/8 bg-card/60">
-          <div className="flex items-center gap-3 border-b border-white/8 p-3">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="flex items-center gap-3 border-b border-border p-3">
             <Input
               ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search player, team, pos…"
-              className="h-9 flex-1 bg-background/40"
+              className="h-9 flex-1 bg-background"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && sortedBoard[0] && !taken.has(sortedBoard[0].id)) {
                   draftPlayer(sortedBoard[0].id);
@@ -400,7 +400,7 @@ export function DraftApp() {
                     "rounded-md px-2 py-1 text-[11px] font-semibold tracking-wide",
                     posFilter === p
                       ? "bg-primary text-primary-foreground"
-                      : "bg-white/5 text-muted-foreground hover:bg-white/10"
+                      : "bg-muted text-muted-foreground hover:bg-accent"
                   )}
                 >
                   {p}
@@ -419,7 +419,7 @@ export function DraftApp() {
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-[#0c1c14] text-[11px] uppercase tracking-wide text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-muted text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-2 py-2 font-medium">#</th>
                   <th className="px-2 py-2 font-medium">Player</th>
@@ -439,9 +439,9 @@ export function DraftApp() {
                     <tr
                       key={p.id}
                       className={cn(
-                        "border-t border-white/5 hover:bg-white/4",
+                        "border-t border-border hover:bg-muted/70",
                         gone && "opacity-40",
-                        starred && !gone && "bg-gold/8"
+                        starred && !gone && "bg-amber-50"
                       )}
                     >
                       <td className="px-2 py-2 font-mono text-xs text-muted-foreground">
@@ -497,7 +497,7 @@ export function DraftApp() {
         </section>
 
         <section className="flex min-h-0 flex-col gap-4 overflow-auto">
-          <div className="rounded-2xl border border-white/8 bg-card/70 p-4">
+          <div className="rounded-2xl border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="font-display text-lg tracking-wide">
                 {done ? "Draft complete" : isUserPick ? "You're on the clock" : "What to take next"}
@@ -515,7 +515,7 @@ export function DraftApp() {
                 {recs.map((rec, idx) => (
                   <li
                     key={rec.player.id}
-                    className="rounded-xl border border-white/8 bg-background/40 p-3"
+                    className="rounded-xl border border-border bg-muted/40 p-3"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex min-w-0 items-start gap-2">
@@ -584,7 +584,7 @@ function WaitChip({ wait }: { wait: "now" | "borderline" | "can-wait" }) {
   }
   if (wait === "can-wait") {
     return (
-      <span className="rounded-md bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
+      <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
         Can wait
       </span>
     );
@@ -626,7 +626,7 @@ function ClockBadge({
         "flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm",
         isUserPick
           ? "border-primary/40 bg-primary/15 text-primary"
-          : "border-white/10 bg-white/5"
+          : "border-border bg-muted"
       )}
     >
       <span className="font-display text-lg leading-none">{formatPick(overall, teams)}</span>
@@ -651,7 +651,7 @@ function RosterCard({
 }) {
   const groups: Position[] = ["QB", "RB", "WR", "TE", "K", "DST"];
   return (
-    <div className="rounded-2xl border border-white/8 bg-card/70 p-4">
+    <div className="rounded-2xl border border-border bg-card p-4">
       <h2 className="mb-3 font-display text-lg tracking-wide">Your roster</h2>
       {roster.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -717,14 +717,14 @@ function PickLog({
 }) {
   if (picks.length === 0) {
     return (
-      <p className="rounded-xl border border-white/8 p-4 text-sm text-muted-foreground">
+      <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground">
         Live mode: click Taken on whoever comes off the board. Practice mode: Jump to me auto-picks the room by ADP until your turn.
       </p>
     );
   }
   const recent = [...picks].reverse().slice(0, 18);
   return (
-    <ul className="space-y-1 rounded-xl border border-white/8 p-2">
+    <ul className="space-y-1 rounded-xl border border-border p-2">
       {recent.map((pk) => {
         const player = board.find((p) => p.id === pk.playerId);
         const mine = pk.team === settings.slot;
@@ -765,7 +765,7 @@ function GapsList({
   onDraft: (id: string) => void;
 }) {
   return (
-    <div className="rounded-xl border border-white/8 p-3">
+    <div className="rounded-xl border border-border p-3">
       <p className="mb-2 text-xs text-muted-foreground">
         Where your two sources disagree. DS+ means DraftSharks is higher — often the value if he lasts. FP+ means FantasyPros is higher.
       </p>
@@ -815,7 +815,7 @@ function PlanCard({
   const turn = slot === 5;
 
   return (
-    <div className="space-y-3 rounded-xl border border-white/8 p-3 text-sm">
+    <div className="space-y-3 rounded-xl border border-border p-3 text-sm">
       <p>
         You are <span className="font-semibold text-primary">JackAL</span>, pick{" "}
         <span className="font-semibold text-primary">5</span> in JFL 28. Snake path is{" "}
@@ -895,7 +895,7 @@ function SettingsSheet({
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-4 px-4 pb-8">
-          <div className="rounded-xl border border-white/8 bg-background/40 p-3 text-sm">
+          <div className="rounded-xl border border-border bg-muted/50 p-3 text-sm">
             <p className="font-medium">Starters (8) + 6 bench + 2 IR</p>
             <p className="mt-1 text-xs text-muted-foreground">
               QB · RB · RB/WR · WR · WR · WR · TE · K. No D/ST. RB/WR is not a full FLEX — TEs cannot

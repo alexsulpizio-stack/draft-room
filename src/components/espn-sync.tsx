@@ -408,7 +408,7 @@ export function EspnSync({
                 onChange={(e) => setSeason(Number(e.target.value) || 2026)}
               />
             </label>
-            <div className="grid gap-3 rounded-xl border border-white/8 p-3">
+            <div className="grid gap-3 rounded-xl border border-border p-3">
               <p className="text-xs text-muted-foreground">
                 Private leagues need cookies from fantasy.espn.com — Application → Cookies in Chrome.
                 They stay in this browser and are only forwarded to ESPN.
@@ -468,7 +468,7 @@ export function EspnSync({
               </label>
             ) : null}
 
-            <div className="grid gap-2 rounded-xl border border-white/8 p-3">
+            <div className="grid gap-2 rounded-xl border border-border p-3">
               <Label>Live room bookmarklet</Label>
               <p className="text-xs text-muted-foreground">
                 ESPN often does not publish <span className="font-mono">mDraftDetail</span> until the draft
