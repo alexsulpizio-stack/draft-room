@@ -51,7 +51,7 @@ import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 
-const STORAGE_KEY = "draft-room-jfl-28";
+const STORAGE_KEY = "draft-room-jfl-28-jackal";
 
 type Persisted = {
   settings: LeagueSettings;
@@ -112,7 +112,9 @@ export function DraftApp() {
           ...DEFAULT_SETTINGS,
           ...(parsed.settings ?? {}),
           roster: { ...DEFAULT_SETTINGS.roster, ...(parsed.settings?.roster ?? {}) },
-          teamNames: parsed.settings?.teamNames ?? [],
+          teamNames: parsed.settings?.teamNames?.length
+            ? parsed.settings.teamNames
+            : DEFAULT_SETTINGS.teamNames,
           draftType: parsed.settings?.draftType ?? "snake",
         },
         extras: parsed.extras ?? [],
@@ -299,7 +301,7 @@ export function DraftApp() {
                 {settings.leagueName || "Draft Room"}
               </p>
               <p className="text-[11px] text-muted-foreground">
-                Half PPR · 3 WR · RB/WR · no D/ST · snake Thu 9/3 7:00 PM
+                JackAL · pick 5 · Half PPR · 3 WR · RB/WR · snake Thu 9/3 7:00 PM
               </p>
             </div>
           </div>
@@ -314,6 +316,7 @@ export function DraftApp() {
               slot={settings.slot}
               untilUser={untilUser}
               nextMine={nextMine}
+              youLabel={settings.teamNames[settings.slot - 1] ?? `Pick ${settings.slot}`}
               teamLabel={
                 onClock && settings.teamNames?.[onClock - 1]
                   ? settings.teamNames[onClock - 1]
@@ -603,6 +606,7 @@ function ClockBadge({
   untilUser,
   nextMine,
   teamLabel,
+  youLabel,
 }: {
   done: boolean;
   overall: number;
@@ -613,6 +617,7 @@ function ClockBadge({
   untilUser: number;
   nextMine: number | null;
   teamLabel?: string;
+  youLabel?: string;
 }) {
   if (done) return <Badge>Complete</Badge>;
   return (
@@ -628,7 +633,9 @@ function ClockBadge({
       <span className="text-xs">
         {isUserPick ? "Your pick" : `${teamLabel ?? `Team ${onClock}`}'s pick`}
         {!isUserPick && nextMine ? ` · ${untilUser} until you` : ""}
-        <span className="ml-1 text-muted-foreground">(you are {slot})</span>
+        <span className="ml-1 text-muted-foreground">
+          ({youLabel ?? `you are ${slot}`})
+        </span>
       </span>
     </div>
   );
@@ -734,7 +741,7 @@ function PickLog({
               </span>
               <span className="truncate">
                 {player?.name ?? pk.playerId}
-                {mine ? " · you" : ` · T${pk.team}`}
+                {mine ? " · you" : ` · ${settings.teamNames[pk.team - 1] ?? `T${pk.team}`}`}
               </span>
             </span>
             {pk.overall === picks.length ? (
@@ -804,32 +811,32 @@ function PlanCard({
   }, [available]);
 
   const slot = settings.slot;
-  const early = slot <= 3;
-  const late = slot >= settings.teams - 2;
+  const turn = slot === 5;
 
   return (
     <div className="space-y-3 rounded-xl border border-white/8 p-3 text-sm">
       <p>
-        You are pick <span className="font-semibold text-primary">{slot}</span> in{" "}
-        <span className="font-semibold text-primary">{settings.leagueName}</span> — 12-team half PPR
-        snake, 3 WR, 1 RB, RB/WR, kicker, no D/ST. Draft Thu Sep 3 at 7:00 PM EDT, 90-second clock.
+        You are <span className="font-semibold text-primary">JackAL</span>, pick{" "}
+        <span className="font-semibold text-primary">5</span> in JFL 28. Snake path is{" "}
+        <span className="font-mono text-foreground">1.05 / 2.08 / 3.05 / 4.08</span>. The 2/3
+        turn is the draft.
       </p>
       <ul className="space-y-2 text-muted-foreground">
         <li>
-          {early
-            ? "This is a 3-WR league. Chase / Nacua / JSN / ARSB go over a mid-RB at 1.01–1.03 unless Gibbs or Bijan is there. Do not take a QB or TE in the first two."
-            : late
-              ? "The 1/2 turn is the draft. If Nacua, JSN, or ARSB slides, take the WR — you start three of them. If not, Cook / Achane / Hampton, then smash a WR coming back."
-              : "Middle slots: take the last elite WR, then hunt Walker, AJ Brown, London, and Nico on the 2/3 turn. You only start one dedicated RB plus an RB/WR."}
+          {turn
+            ? "1.05: take the last of Gibbs / Bijan / Chase / Nacua / JSN. In this 3-WR league, an elite WR at 5 is not a reach. Pass on CMC unless the top five are gone — WATCH flag, and you only start one dedicated RB."
+            : slot <= 3
+              ? "This is a 3-WR league. Chase / Nacua / JSN / ARSB go over a mid-RB at 1.01–1.03 unless Gibbs or Bijan is there."
+              : "Late slot: if Nacua, JSN, or ARSB slides, take the WR. You start three of them."}
         </li>
         <li>
-          RB/WR is not full FLEX — TE cannot go there. Get one workhorse RB, then fill the combo with a WR if the board is WR-heavy.
+          2.08 comes back after eight picks. If you took WR at 5, smash the best remaining RB (Cook / Achane / Hampton / Walker). If you took RB at 5, take the best WR on the board — London, AJ Brown, Nico, ARSB.
         </li>
         <li>
-          1QB, wait unless Allen falls to the 4th. TE: Bowers or McBride through round 3, then Loveland / Warren / Kraft. Never draft a D/ST. Kicker in the last round.
+          RB/WR is not full FLEX — TE cannot go there. One workhorse RB is enough early; extra WRs can fill the combo. Never draft a D/ST. Kicker in round 14. Wait on QB unless Allen falls to 4.08.
         </li>
         <li>
-          First downs pay 0.25, so volume RBs and chain-moving WRs tick up versus boom-only guys. Confirm before Thursday: Jeanty&apos;s leg, Nabers&apos; workload, Egbuka&apos;s toe, Love&apos;s ankle, Kraft practicing, Kamara (out).
+          First downs pay 0.25. Confirm before Thursday: Jeanty&apos;s leg, Nabers&apos; workload, Egbuka&apos;s toe, Love&apos;s ankle, Kraft practicing, Kamara (out).
         </li>
       </ul>
       <div>
@@ -882,8 +889,8 @@ function SettingsSheet({
         <SheetHeader>
           <SheetTitle>{settings.leagueName}</SheetTitle>
           <SheetDescription>
-            Loaded from the ESPN settings PDF. 12-team half PPR snake, 14 rounds, 90 seconds a pick.
-            Draft order is set by the LM — pick your slot.
+            Loaded from ESPN. You are <span className="text-foreground">JackAL, pick 5</span>.
+            Snake turns are 1.05 and 2.08. 90 seconds a pick, Thu Sep 3, 7:00 PM EDT.
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-4 px-4 pb-8">
@@ -902,7 +909,8 @@ function SettingsSheet({
             >
               {Array.from({ length: settings.teams }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
-                  Pick {n}
+                  {n}. {settings.teamNames[n - 1] ?? `Pick ${n}`}
+                  {n === 5 ? " (you)" : ""}
                 </option>
               ))}
             </select>

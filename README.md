@@ -2,7 +2,11 @@
 
 Desktop draft companion for **JFL 28** on ESPN (league `1361349772`).
 
-Snake draft is **Thursday, Sep 3, 2026 at 7:00 PM EDT**, 90 seconds a pick. This is a 12-team **half PPR** league with a WR-heavy lineup and no defense.
+Snake draft is **Thursday, Sep 3, 2026 at 7:00 PM EDT**, 90 seconds a pick. You are **JackAL, pick 5** (1.05 / 2.08 / 3.05 / 4.08).
+
+## Draft order
+
+1. Deadman Inc. · 2. Doc · 3. Bradys Sports Cards · 4. Finest Meats and Cheeses · **5. JackAL (you)** · 6. 2 Street · 7. It's Easy · 8. Molesters · 9. Vince's Pizza · 10. ARITSTARERYTIOCTTI · 11. Black Lodge · 12. Shysters
 
 ## League (from ESPN settings)
 
@@ -28,7 +32,7 @@ Open [http://localhost:43173](http://localhost:43173) in Chrome on a computer. K
 
 ## ESPN live sync
 
-The league is private. Open **ESPN**, confirm league ID `1361349772`, paste `SWID` and `espn_s2` from fantasy.espn.com cookies, and Connect. Set **your slot** — the LM set the draft order by hand.
+The league is private. Open **ESPN**, confirm league ID `1361349772`, paste `SWID` and `espn_s2` from fantasy.espn.com cookies, and Connect. You are already set to **JackAL, pick 5**.
 
 ESPN's `mDraftDetail` often stays empty until the draft ends. Drag **Sync Draft Room** to your bookmarks bar and click it on the live draft tab so picks still stream in.
 
