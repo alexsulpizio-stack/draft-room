@@ -46,9 +46,10 @@ import {
   userPickOveralls,
 } from "@/lib/draft";
 import { applyUpdates, parseRankingPaste } from "@/lib/parse-import";
-import type { DraftPick, LeagueSettings, Player, Position } from "@/lib/types";
+import type { DraftPick, DraftType, LeagueSettings, Player, Position } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
+import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 
 const STORAGE_KEY = "draft-room-2026";
 
@@ -57,6 +58,7 @@ type Persisted = {
   picks: DraftPick[];
   stars: string[];
   avoids: string[];
+  extras?: Player[];
   importText?: string;
 };
 
@@ -65,6 +67,7 @@ const EMPTY: Persisted = {
   picks: [],
   stars: [],
   avoids: [],
+  extras: [],
 };
 
 function readRaw() {
@@ -98,7 +101,19 @@ export function DraftApp() {
   const raw = useSyncExternalStore(subscribe, readRaw, () => JSON.stringify(EMPTY));
   const data: Persisted = useMemo(() => {
     try {
-      return { ...EMPTY, ...(JSON.parse(raw) as Persisted) };
+      const parsed = JSON.parse(raw) as Persisted;
+      return {
+        ...EMPTY,
+        ...parsed,
+        settings: {
+          ...DEFAULT_SETTINGS,
+          ...(parsed.settings ?? {}),
+          roster: { ...DEFAULT_SETTINGS.roster, ...(parsed.settings?.roster ?? {}) },
+          teamNames: parsed.settings?.teamNames ?? [],
+          draftType: parsed.settings?.draftType ?? "snake",
+        },
+        extras: parsed.extras ?? [],
+      };
     } catch {
       return EMPTY;
     }
@@ -106,6 +121,7 @@ export function DraftApp() {
   const settings = data.settings ?? DEFAULT_SETTINGS;
   const picks = data.picks ?? EMPTY.picks;
   const stars = data.stars ?? EMPTY.stars;
+  const extras = useMemo(() => data.extras ?? [], [data.extras]);
 
   const setSettings = useCallback(
     (next: LeagueSettings) => writeStore({ ...data, settings: next }),
@@ -125,6 +141,12 @@ export function DraftApp() {
     },
     [data]
   );
+  const applyEspnPicks = useCallback(
+    (nextPicks: DraftPick[], extraPlayers: Player[]) => {
+      writeStore({ ...data, picks: nextPicks, extras: extraPlayers });
+    },
+    [data]
+  );
 
   const [query, setQuery] = useState("");
   const [posFilter, setPosFilter] = useState<Position | "ALL">("ALL");
@@ -133,13 +155,20 @@ export function DraftApp() {
   const [importText, setImportText] = useState("");
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Player[] | null>(null);
+  const [espn, setEspn] = useState<EspnLiveStatus>({ live: false, source: "empty", pickCount: 0 });
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const board = overrides ?? PLAYERS;
+  const board = useMemo(() => {
+    const base = overrides ?? PLAYERS;
+    if (!extras.length) return base;
+    const ids = new Set(base.map((p) => p.id));
+    return [...base, ...extras.filter((e) => !ids.has(e.id))];
+  }, [overrides, extras]);
+  const byId = useMemo(() => new Map(board.map((p) => [p.id, p])), [board]);
   const overall = picks.length + 1;
   const totalPicks = settings.teams * settings.rounds;
   const done = picks.length >= totalPicks;
-  const onClock = done ? null : pickOwner(overall, settings.teams);
+  const onClock = done ? null : pickOwner(overall, settings.teams, settings.draftType ?? "snake");
   const isUserPick = onClock === settings.slot;
   const untilUser = picksUntilUser(overall, settings);
   const nextMine = nextUserPick(overall, settings);
@@ -150,8 +179,8 @@ export function DraftApp() {
   }, [board, taken]);
 
   const myRoster = useMemo(
-    () => rosterFor(picks, settings.slot).map((p) => board.find((b) => b.id === p.id) ?? p),
-    [picks, settings.slot, board]
+    () => rosterFor(picks, settings.slot, byId),
+    [picks, settings.slot, byId]
   );
 
   const recs = useMemo(() => {
@@ -217,9 +246,9 @@ export function DraftApp() {
       };
       while (next.length < totalPicks) {
         const o = next.length + 1;
-        const team = pickOwner(o, settings.teams);
+        const team = pickOwner(o, settings.teams, settings.draftType ?? "snake");
         if (team === settings.slot) break;
-        const roster = rosterFor(next, team).map((p) => board.find((b) => b.id === p.id) ?? p);
+        const roster = rosterFor(next, team, byId);
         const pick = autoPickForTeam({
           team,
           roster,
@@ -245,7 +274,12 @@ export function DraftApp() {
     setImportOpen(false);
   };
 
-  const myPicks = userPickOveralls(settings.slot, settings.teams, settings.rounds);
+  const myPicks = userPickOveralls(
+    settings.slot,
+    settings.teams,
+    settings.rounds,
+    settings.draftType ?? "snake"
+  );
   const needs = starterNeeds(myRoster, settings);
 
   return (
@@ -274,16 +308,34 @@ export function DraftApp() {
               slot={settings.slot}
               untilUser={untilUser}
               nextMine={nextMine}
+              teamLabel={
+                onClock && settings.teamNames?.[onClock - 1]
+                  ? settings.teamNames[onClock - 1]
+                  : undefined
+              }
             />
             <Button variant="outline" size="sm" onClick={undo} disabled={picks.length === 0}>
               <Undo2 /> Undo
             </Button>
-            <Button variant="outline" size="sm" onClick={jumpToMe} disabled={done || isUserPick}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={jumpToMe}
+              disabled={done || isUserPick || espn.live}
+              title={espn.live ? "Jump to me is off while ESPN is the source of truth" : undefined}
+            >
               <Zap /> Jump to me
             </Button>
             <Button variant="ghost" size="sm" onClick={resetDraft} disabled={picks.length === 0}>
               <RotateCcw /> Reset
             </Button>
+            <EspnSync
+              settings={settings}
+              setSettings={setSettings}
+              onPicksFromEspn={applyEspnPicks}
+              status={espn}
+              setStatus={setEspn}
+            />
             <ImportDialog
               open={importOpen}
               onOpenChange={setImportOpen}
@@ -294,7 +346,22 @@ export function DraftApp() {
             <SettingsSheet settings={settings} setSettings={setSettings} />
           </div>
         </div>
-        {importMsg ? (
+        {espn.live ? (
+          <p className="border-t border-primary/20 bg-primary/8 px-4 py-1.5 text-center text-xs">
+            <span className="font-medium text-primary">ESPN live</span>
+            <span className="text-muted-foreground">
+              {" "}
+              · {espn.pickCount} picks
+              {espn.source === "room-capture"
+                ? " · room capture"
+                : espn.source === "espn-api"
+                  ? " · league API"
+                  : " · waiting for picks"}
+              {espn.leagueName ? ` · ${espn.leagueName}` : ""}
+              {espn.warning ? ` · ${espn.warning}` : ""}
+            </span>
+          </p>
+        ) : importMsg ? (
           <p className="border-t border-white/5 px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
         ) : null}
       </header>
@@ -529,6 +596,7 @@ function ClockBadge({
   slot,
   untilUser,
   nextMine,
+  teamLabel,
 }: {
   done: boolean;
   overall: number;
@@ -538,6 +606,7 @@ function ClockBadge({
   slot: number;
   untilUser: number;
   nextMine: number | null;
+  teamLabel?: string;
 }) {
   if (done) return <Badge>Complete</Badge>;
   return (
@@ -551,7 +620,7 @@ function ClockBadge({
     >
       <span className="font-display text-lg leading-none">{formatPick(overall, teams)}</span>
       <span className="text-xs">
-        {isUserPick ? "Your pick" : `Team ${onClock}'s pick`}
+        {isUserPick ? "Your pick" : `${teamLabel ?? `Team ${onClock}`}'s pick`}
         {!isUserPick && nextMine ? ` · ${untilUser} until you` : ""}
         <span className="ml-1 text-muted-foreground">(you are {slot})</span>
       </span>
@@ -732,7 +801,8 @@ function PlanCard({
     <div className="space-y-3 rounded-xl border border-white/8 p-3 text-sm">
       <p>
         You are pick <span className="font-semibold text-primary">{slot}</span> in a {settings.teams}-team{" "}
-        {settings.scoring.toUpperCase()} {settings.superflex ? "Superflex" : "1QB"} snake.
+        {settings.scoring.toUpperCase()} {settings.superflex ? "Superflex" : "1QB"}{" "}
+        {settings.draftType === "linear" ? "linear" : "snake"}.
       </p>
       <ul className="space-y-2 text-muted-foreground">
         <li>
@@ -886,6 +956,21 @@ function SettingsSheet({
                   {n} rounds
                 </option>
               ))}
+            </select>
+          </Field>
+          <Field label="Draft type">
+            <select
+              className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
+              value={settings.draftType ?? "snake"}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  draftType: e.target.value as DraftType,
+                })
+              }
+            >
+              <option value="snake">Snake</option>
+              <option value="linear">Linear</option>
             </select>
           </Field>
         </div>

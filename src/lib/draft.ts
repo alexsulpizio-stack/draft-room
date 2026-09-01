@@ -1,5 +1,6 @@
 import type {
   DraftPick,
+  DraftType,
   LeagueSettings,
   Player,
   Position,
@@ -16,10 +17,15 @@ export function slugifyName(name: string) {
     .replace(/^-|-$/g, "");
 }
 
-export function pickOwner(overall: number, teams: number): number {
+export function pickOwner(
+  overall: number,
+  teams: number,
+  draftType: DraftType = "snake"
+): number {
   const i = overall - 1;
-  const round = Math.floor(i / teams);
   const pos = i % teams;
+  if (draftType === "linear") return pos + 1;
+  const round = Math.floor(i / teams);
   return round % 2 === 0 ? pos + 1 : teams - pos;
 }
 
@@ -32,11 +38,16 @@ export function pickInRound(overall: number, teams: number) {
   return pos;
 }
 
-export function userPickOveralls(slot: number, teams: number, rounds: number) {
+export function userPickOveralls(
+  slot: number,
+  teams: number,
+  rounds: number,
+  draftType: DraftType = "snake"
+) {
   const picks: number[] = [];
   for (let round = 1; round <= rounds; round++) {
     const overall =
-      round % 2 === 1
+      draftType === "linear" || round % 2 === 1
         ? (round - 1) * teams + slot
         : round * teams - slot + 1;
     picks.push(overall);
@@ -45,14 +56,21 @@ export function userPickOveralls(slot: number, teams: number, rounds: number) {
 }
 
 export function nextUserPick(overall: number, settings: LeagueSettings) {
-  const mine = userPickOveralls(settings.slot, settings.teams, settings.rounds);
+  const mine = userPickOveralls(
+    settings.slot,
+    settings.teams,
+    settings.rounds,
+    settings.draftType ?? "snake"
+  );
   return mine.find((p) => p >= overall) ?? null;
 }
 
 export function picksUntilUser(overall: number, settings: LeagueSettings) {
   const next = nextUserPick(overall, settings);
   if (next == null) return 0;
-  if (pickOwner(overall, settings.teams) === settings.slot) return 0;
+  if (pickOwner(overall, settings.teams, settings.draftType ?? "snake") === settings.slot) {
+    return 0;
+  }
   return Math.max(0, next - overall);
 }
 
@@ -93,10 +111,14 @@ export function vor(player: Player, settings: LeagueSettings) {
   return adjustedProj(player, settings) - repl[player.pos];
 }
 
-export function rosterFor(picks: DraftPick[], team: number): Player[] {
+export function rosterFor(
+  picks: DraftPick[],
+  team: number,
+  byId: Map<string, Player> = PLAYER_BY_ID
+): Player[] {
   return picks
     .filter((p) => p.team === team)
-    .map((p) => PLAYER_BY_ID.get(p.playerId))
+    .map((p) => byId.get(p.playerId))
     .filter((p): p is Player => Boolean(p));
 }
 

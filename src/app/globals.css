@@ -137,3 +137,17 @@
     font-family: var(--font-display), "Barlow Condensed", sans-serif;
   }
 }
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-live-pulse {
+  animation: live-pulse 1.4s ease-in-out infinite;
+}

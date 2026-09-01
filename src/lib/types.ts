@@ -1,6 +1,7 @@
 export type Position = "QB" | "RB" | "WR" | "TE" | "K" | "DST";
 export type Scoring = "ppr" | "half" | "standard";
 export type Injury = "watch" | "questionable" | "out";
+export type DraftType = "snake" | "linear";
 
 export interface Player {
   id: string;
@@ -25,6 +26,8 @@ export interface LeagueSettings {
   scoring: Scoring;
   superflex: boolean;
   dsWeight: number;
+  draftType: DraftType;
+  teamNames: string[];
   roster: {
     qb: number;
     rb: number;
@@ -57,6 +60,8 @@ export const DEFAULT_SETTINGS: LeagueSettings = {
   scoring: "ppr",
   superflex: false,
   dsWeight: 50,
+  draftType: "snake",
+  teamNames: [],
   roster: {
     qb: 1,
     rb: 2,

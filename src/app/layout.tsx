@@ -21,7 +21,7 @@ const display = Barlow_Condensed({
 export const metadata: Metadata = {
   title: "Draft Room · FantasyPros × DraftSharks",
   description:
-    "Live 2026 fantasy football draft companion. Blend FantasyPros ECR with DraftSharks 3D value, get on-the-clock picks, and mock your Wednesday slot.",
+    "Live 2026 fantasy football draft companion. Sync ESPN drafts, blend FantasyPros ECR with DraftSharks 3D value, and get on-the-clock picks.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
