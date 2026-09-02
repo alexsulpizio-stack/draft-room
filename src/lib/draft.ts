@@ -74,11 +74,6 @@ export function picksUntilUser(overall: number, settings: LeagueSettings) {
   return Math.max(0, next - overall);
 }
 
-export function blendedRank(player: Player, dsWeight: number) {
-  const w = Math.min(100, Math.max(0, dsWeight)) / 100;
-  return player.fpRank * (1 - w) + player.dsRank * w;
-}
-
 /** Snapshot / ESPN stub sentinel for "this source has no rank". */
 export const UNRANKED = 900;
 
@@ -91,6 +86,21 @@ export function isMissingRank(n: number | undefined | null): boolean {
 
 export function sourceRank(n: number | undefined | null): number | null {
   return isMissingRank(n) ? null : (n as number);
+}
+
+/**
+ * Slider mix for the leftmost # column.
+ * fpWeight = 100 - dsWeight, so 70% FP / 30% DS → 0.7*fpRank + 0.3*dsRank.
+ * Missing/sentinel ranks (0, -1, 999, …) are skipped: use the available source, or null.
+ */
+export function blendedRank(player: Player, dsWeight: number): number | null {
+  const fp = sourceRank(player.fpRank);
+  const ds = sourceRank(player.dsRank);
+  const w = Math.min(100, Math.max(0, dsWeight)) / 100;
+  if (fp != null && ds != null) return fp * (1 - w) + ds * w;
+  if (fp != null) return fp;
+  if (ds != null) return ds;
+  return null;
 }
 
 /** Nulls last, in both directions — missing ranks never float to the top as #1. */
@@ -107,10 +117,16 @@ export function compareSourceRank(
   return (av - bv) * sign;
 }
 
-function blendOrNull(player: Player, dsWeight: number): number | null {
-  if (isMissingRank(player.fpRank) && isMissingRank(player.dsRank)) return null;
-  const n = blendedRank(player, dsWeight);
-  return Number.isFinite(n) && n > 0 && n < UNRANKED ? n : null;
+/** Nulls last for already-cleaned numbers (blended ranks). */
+function compareNullableNumber(
+  a: number | null,
+  b: number | null,
+  sign: number,
+): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (a - b) * sign;
 }
 
 export function compareBoard(
@@ -139,11 +155,11 @@ export function compareBoard(
       d = (sourceGap(a) - sourceGap(b)) * sign;
       break;
     default:
-      d = compareSourceRank(blendOrNull(a, dsWeight), blendOrNull(b, dsWeight), sign);
+      d = compareNullableNumber(blendedRank(a, dsWeight), blendedRank(b, dsWeight), sign);
   }
   if (d !== 0) return d;
-  const blend = blendedRank(a, dsWeight) - blendedRank(b, dsWeight);
-  if (blend !== 0) return blend * sign;
+  const blendCmp = compareNullableNumber(blendedRank(a, dsWeight), blendedRank(b, dsWeight), sign);
+  if (blendCmp !== 0) return blendCmp;
   return a.name.localeCompare(b.name);
 }
 
@@ -153,15 +169,19 @@ export function formatSourceRank(n: number | undefined | null): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(0);
 }
 
-/** Leftmost # cell: the active sort's actual source rank, not a 1..n re-index of visible rows. */
-export function formatBoardRank(player: Player, sortKey: BoardSort, dsWeight: number): string {
-  if (sortKey === "fp") return formatSourceRank(player.fpRank);
-  if (sortKey === "ds") return formatSourceRank(player.dsRank);
-  if (sortKey === "adp") return formatSourceRank(player.adp);
-  const blend = blendOrNull(player, dsWeight);
-  if (blend == null) return "—";
-  const tenths = Math.round(blend * 10) / 10;
+/** Display a blended rank: integer as-is, otherwise one decimal (Gibbs 1.5 stays 1.5). */
+export function formatBlendedRank(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const tenths = Math.round(n * 10) / 10;
   return Number.isInteger(tenths) ? String(tenths) : tenths.toFixed(1);
+}
+
+/**
+ * Leftmost # cell: always the slider mix, never the FP/DS/ADP sort key.
+ * Sorting other columns only reorders rows; # still shows the blend.
+ */
+export function formatBoardRank(player: Player, dsWeight: number): string {
+  return formatBlendedRank(blendedRank(player, dsWeight));
 }
 
 export function scoringMult(pos: Position, scoring: Scoring) {
@@ -273,11 +293,14 @@ function needScore(player: Player, roster: Player[], settings: LeagueSettings) {
   return 4;
 }
 
-function scarcityScore(player: Player, available: Player[]) {
+function scarcityScore(player: Player, available: Player[], dsWeight: number) {
   const same = available.filter((p) => p.pos === player.pos);
-  const better = same.filter(
-    (p) => (p.fpRank + p.dsRank) / 2 < (player.fpRank + player.dsRank) / 2
-  ).length;
+  const mine = blendedRank(player, dsWeight);
+  const better = same.filter((p) => {
+    const theirs = blendedRank(p, dsWeight);
+    if (theirs == null || mine == null) return false;
+    return theirs < mine;
+  }).length;
   if (player.pos === "RB" && better <= 3) return 10;
   if (player.pos === "WR" && better <= 6) return 8;
   if (player.pos === "TE" && better <= 1) return 12;
@@ -307,8 +330,10 @@ export function recommendPicks(args: {
       const v = vor(p, settings);
       const need = needScore(p, roster, settings);
       const value = p.adp - overall;
-      const scarce = scarcityScore(p, available);
-      const gap = p.fpRank - p.dsRank;
+      const scarce = scarcityScore(p, available, settings.dsWeight);
+      const fp = sourceRank(p.fpRank);
+      const ds = sourceRank(p.dsRank);
+      const gap = fp != null && ds != null ? fp - ds : 0;
       const dsPull = (gap * settings.dsWeight) / 50;
       const rank = blendedRank(p, settings.dsWeight);
       const waitPicks = p.adp - overall;
@@ -325,7 +350,7 @@ export function recommendPicks(args: {
         Math.max(value, -8) * 0.55 +
         scarce * 1.1 +
         dsPull * 0.35 +
-        (180 - rank) * 0.45 +
+        (rank == null ? 0 : (180 - rank) * 0.45) +
         (wait === "now" ? 6 : 0) +
         (p.tags.includes("value") || p.tags.includes("ds-boost") ? 3 : 0) -
         (p.injury === "questionable" ? 8 : 0) -
@@ -345,7 +370,9 @@ export function recommendPicks(args: {
       } else if (wait === "can-wait") {
         reasons.push("Likely still there next turn if you want someone else");
       }
-      if (reasons.length === 0) reasons.push(`Best remaining by blended rank (#${Math.round(rank)})`);
+      if (reasons.length === 0) {
+        reasons.push(`Best remaining by blended rank (#${formatBlendedRank(rank)})`);
+      }
 
       return { player: p, score, reasons: reasons.slice(0, 3), wait };
     })
@@ -401,7 +428,10 @@ export function autoPickForTeam(args: {
 }
 
 export function sourceGap(player: Player) {
-  return player.fpRank - player.dsRank;
+  const fp = sourceRank(player.fpRank);
+  const ds = sourceRank(player.dsRank);
+  if (fp == null || ds == null) return 0;
+  return fp - ds;
 }
 
 export function formatPick(overall: number, teams: number) {

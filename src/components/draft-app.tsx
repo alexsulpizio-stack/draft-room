@@ -599,18 +599,18 @@ export function DraftApp() {
           </div>
           <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] text-muted-foreground">
             <span>
-              Sorted by{" "}
+              # mix FP {100 - settings.dsWeight}% / DS {settings.dsWeight}%
               {sortKey === "blend"
-                ? `blended rank · FP ${100 - settings.dsWeight}% / DS ${settings.dsWeight}%`
+                ? ""
                 : sortKey === "pos"
-                  ? `position ${sortDir === "asc" ? "QB → DST" : "DST → QB"}`
+                  ? ` · sorted by position ${sortDir === "asc" ? "QB → DST" : "DST → QB"}`
                   : sortKey === "fp"
-                    ? `FantasyPros ${sortDir === "asc" ? "best first" : "worst first"}`
+                    ? ` · sorted by FantasyPros ${sortDir === "asc" ? "best first" : "worst first"}`
                     : sortKey === "ds"
-                      ? `DraftSharks ${sortDir === "asc" ? "best first" : "worst first"}`
+                      ? ` · sorted by DraftSharks ${sortDir === "asc" ? "best first" : "worst first"}`
                       : sortKey === "adp"
-                        ? `ADP ${sortDir === "asc" ? "earliest first" : "latest first"}`
-                        : `FP vs DS gap ${sortDir === "desc" ? "DS+ first" : "FP+ first"}`}
+                        ? ` · sorted by ADP ${sortDir === "asc" ? "earliest first" : "latest first"}`
+                        : ` · sorted by FP vs DS gap ${sortDir === "desc" ? "DS+ first" : "FP+ first"}`}
               {rankOverlay
                 ? ` · live ${scoringLabel(settings.scoring)} ${new Date(rankOverlay.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${
                     rankOverlay.injuriesLive
@@ -652,7 +652,7 @@ export function DraftApp() {
                       )}
                     >
                       <td className="px-2 py-2 font-mono text-xs text-muted-foreground">
-                        {formatBoardRank(p, sortKey, settings.dsWeight)}
+                        {formatBoardRank(p, settings.dsWeight)}
                       </td>
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-2">
@@ -735,7 +735,8 @@ export function DraftApp() {
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
                             <PlayerSubline player={rec.player} className="text-xs" />
-                            {" · "}FP {formatSourceRank(rec.player.fpRank)} · DS {formatSourceRank(rec.player.dsRank)}
+                            {" · "}#{formatBoardRank(rec.player, settings.dsWeight)} · FP{" "}
+                            {formatSourceRank(rec.player.fpRank)} · DS {formatSourceRank(rec.player.dsRank)}
                           </p>
                           <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                             {rec.reasons.map((r) => (
