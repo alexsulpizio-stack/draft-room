@@ -51,8 +51,13 @@ import {
   userPickOveralls,
 } from "@/lib/draft";
 import { applyUpdates, parseRankingPaste } from "@/lib/parse-import";
-import { applyRankPatches, scoringLabel, type RankPatch } from "@/lib/rank-refresh";
-import type { DraftPick, DraftType, LeagueSettings, Player, Position } from "@/lib/types";
+import {
+  applyInjuryOverlay,
+  applyRankPatches,
+  scoringLabel,
+  type RankPatch,
+} from "@/lib/rank-refresh";
+import type { DraftPick, DraftType, Injury, LeagueSettings, Player, Position } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
@@ -142,6 +147,9 @@ type RankOverlay = {
   fpMatched: number;
   dsMatched: number;
   fpUpdated?: string;
+  injuries?: Record<string, Injury>;
+  injuryMatched?: number;
+  injuriesLive?: boolean;
 };
 
 type Persisted = {
@@ -265,7 +273,11 @@ export function DraftApp() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   const board = useMemo(() => {
-    const ranked = applyRankPatches(PLAYERS, rankOverlay?.patches);
+    const ranked = applyInjuryOverlay(
+      applyRankPatches(PLAYERS, rankOverlay?.patches),
+      rankOverlay?.injuries,
+      rankOverlay?.injuriesLive,
+    );
     const base = overrides ?? ranked;
     if (!extras.length) return base;
     const ids = new Set(base.map((p) => p.id));
@@ -382,7 +394,16 @@ export function DraftApp() {
 
   const applyImport = () => {
     const parsed = parseRankingPaste(importText);
-    setOverrides(applyUpdates(applyRankPatches(PLAYERS, rankOverlay?.patches), parsed.updates));
+    setOverrides(
+      applyUpdates(
+        applyInjuryOverlay(
+          applyRankPatches(PLAYERS, rankOverlay?.patches),
+          rankOverlay?.injuries,
+          rankOverlay?.injuriesLive,
+        ),
+        parsed.updates,
+      ),
+    );
     setImportMsg(
       `Updated ${parsed.matched} players from your paste${
         parsed.unmatched.length ? `. Unmatched: ${parsed.unmatched.slice(0, 6).join(", ")}` : "."
@@ -401,32 +422,52 @@ export function DraftApp() {
         error?: string;
         warnings?: string[];
         patches?: Record<string, RankPatch>;
+        injuries?: Record<string, Injury>;
+        injuryMatched?: number;
+        injuriesLive?: boolean;
         fetchedAt?: number;
         scoring?: string;
         fpMatched?: number;
         dsMatched?: number;
         fpUpdated?: string;
       };
-      if (!json.ok || !json.patches) {
+      if (!json.ok) {
         setImportMsg(json.error ?? "Could not refresh FantasyPros / DraftSharks ranks.");
         return;
       }
+      const patches =
+        json.patches && Object.keys(json.patches).length > 0
+          ? json.patches
+          : data.rankOverlay?.patches;
+      const injuriesLive = Boolean(json.injuriesLive && json.injuries);
       setOverrides(null);
       writeStore({
         ...data,
         rankOverlay: {
-          patches: json.patches,
+          patches: patches ?? {},
           fetchedAt: json.fetchedAt ?? Date.now(),
           scoring: json.scoring ?? settings.scoring,
           fpMatched: json.fpMatched ?? 0,
           dsMatched: json.dsMatched ?? 0,
           fpUpdated: json.fpUpdated,
+          injuries: injuriesLive ? json.injuries : data.rankOverlay?.injuries,
+          injuryMatched: injuriesLive
+            ? json.injuryMatched
+            : data.rankOverlay?.injuryMatched,
+          injuriesLive: injuriesLive || data.rankOverlay?.injuriesLive,
         },
       });
       const when = json.fpUpdated ? ` · FP ${json.fpUpdated}` : "";
-      const warn = json.warnings?.length ? ` · ${json.warnings[0]}` : "";
+      const inj = injuriesLive
+        ? ` · ${json.injuryMatched} injury flags`
+        : data.rankOverlay?.injuriesLive
+          ? ` · kept ${data.rankOverlay.injuryMatched ?? 0} injury flags`
+          : json.warnings?.find((w) => /injur/i.test(w))
+            ? ` · ${json.warnings.find((w) => /injur/i.test(w))}`
+            : " · snapshot injuries kept";
+      const warn = json.warnings?.find((w) => !/injur/i.test(w));
       setImportMsg(
-        `Refreshed ${scoringLabel(settings.scoring)} ranks · FP ${json.fpMatched} · DS ${json.dsMatched}${when}${warn}`,
+        `Refreshed ${scoringLabel(settings.scoring)} ranks · FP ${json.fpMatched ?? 0} · DS ${json.dsMatched ?? 0}${inj}${when}${warn ? ` · ${warn}` : ""}`,
       );
     } catch {
       setImportMsg("Network error refreshing ranks. The snapshot board is unchanged.");
@@ -508,7 +549,7 @@ export function DraftApp() {
               size="sm"
               onClick={() => void refreshRankings()}
               disabled={refreshing}
-              title="Pull live FantasyPros ECR and DraftSharks 3D ranks for the scoring in League settings"
+              title="Pull live FantasyPros ECR, DraftSharks 3D ranks, and current Out / Q / Watch injury flags"
             >
               {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               {refreshing ? "Refreshing…" : "Refresh ranks"}
@@ -591,7 +632,11 @@ export function DraftApp() {
                         ? `ADP ${sortDir === "asc" ? "earliest first" : "latest first"}`
                         : `FP vs DS gap ${sortDir === "desc" ? "DS+ first" : "FP+ first"}`}
               {rankOverlay
-                ? ` · live ${scoringLabel(settings.scoring)} ${new Date(rankOverlay.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                ? ` · live ${scoringLabel(settings.scoring)} ${new Date(rankOverlay.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${
+                    rankOverlay.injuriesLive
+                      ? ` · ${rankOverlay.injuryMatched ?? 0} injury flags`
+                      : ""
+                  }`
                 : " · Sept 1 snapshot"}
             </span>
             <label className="flex items-center gap-2">
@@ -861,11 +906,14 @@ function RosterCard({
                   <ul className="space-y-1">
                     {here.map((p) => (
                       <li key={p.id} className="flex items-center justify-between text-sm">
-                        <span>
-                          {p.name}{" "}
-                          <span className="text-xs text-muted-foreground">
-                            {p.team} · bye {p.bye}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate">
+                            {p.name}{" "}
+                            <span className="text-xs text-muted-foreground">
+                              {p.team} · bye {p.bye}
+                            </span>
                           </span>
+                          <InjuryDot injury={p.injury} />
                         </span>
                       </li>
                     ))}
@@ -926,6 +974,7 @@ function PickLog({
                 {player?.name ?? pk.playerId}
                 {mine ? " · you" : ` · ${settings.teamNames[pk.team - 1] ?? `T${pk.team}`}`}
               </span>
+              <InjuryDot injury={player?.injury} />
             </span>
             {pk.overall === picks.length ? (
               <button type="button" onClick={onUndo} className="text-muted-foreground hover:text-foreground">
@@ -958,6 +1007,7 @@ function GapsList({
               <div className="flex items-center gap-1.5">
                 <span className="truncate font-medium">{player.name}</span>
                 <PosBadge pos={player.pos} />
+                <InjuryDot injury={player.injury} />
               </div>
               <p className="text-[11px] text-muted-foreground">
                 FP {player.fpRank} · DS {player.dsRank} · ADP {player.adp.toFixed(0)}
