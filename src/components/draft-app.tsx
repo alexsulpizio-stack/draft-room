@@ -38,17 +38,19 @@ import { cn } from "@/lib/utils";
 import { PLAYERS, displayName } from "@/lib/players";
 import {
   autoPickForTeam,
-  blendedRank,
+  compareBoard,
+  formatBoardRank,
   formatPick,
+  formatSourceRank,
   nextUserPick,
   pickOwner,
   picksUntilUser,
-  POS_ORDER,
   recommendPicks,
   rosterFor,
   sourceGap,
   starterNeeds,
   userPickOveralls,
+  type BoardSort,
 } from "@/lib/draft";
 import { applyUpdates, parseRankingPaste } from "@/lib/parse-import";
 import {
@@ -63,41 +65,6 @@ import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
-
-type BoardSort = "blend" | "pos" | "fp" | "ds" | "adp" | "gap";
-
-function compareBoard(
-  a: Player,
-  b: Player,
-  key: BoardSort,
-  dir: "asc" | "desc",
-  dsWeight: number,
-) {
-  const sign = dir === "asc" ? 1 : -1;
-  const blend = blendedRank(a, dsWeight) - blendedRank(b, dsWeight);
-  let d = 0;
-  switch (key) {
-    case "pos":
-      d = POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos);
-      break;
-    case "fp":
-      d = a.fpRank - b.fpRank;
-      break;
-    case "ds":
-      d = a.dsRank - b.dsRank;
-      break;
-    case "adp":
-      d = a.adp - b.adp;
-      break;
-    case "gap":
-      d = sourceGap(a) - sourceGap(b);
-      break;
-    default:
-      d = blend;
-  }
-  if (d === 0) d = blend || a.name.localeCompare(b.name);
-  return d * sign;
-}
 
 function SortTh({
   label,
@@ -680,7 +647,7 @@ export function DraftApp() {
                       )}
                     >
                       <td className="px-2 py-2 font-mono text-xs text-muted-foreground">
-                        {Math.round(blendedRank(p, settings.dsWeight))}
+                        {formatBoardRank(p, sortKey, settings.dsWeight)}
                       </td>
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-2">
@@ -704,9 +671,9 @@ export function DraftApp() {
                       <td className="px-2 py-2">
                         <PosBadge pos={p.pos} />
                       </td>
-                      <td className="px-2 py-2 font-mono text-xs">{p.fpRank}</td>
-                      <td className="px-2 py-2 font-mono text-xs">{p.dsRank}</td>
-                      <td className="px-2 py-2 font-mono text-xs">{p.adp.toFixed(0)}</td>
+                      <td className="px-2 py-2 font-mono text-xs">{formatSourceRank(p.fpRank)}</td>
+                      <td className="px-2 py-2 font-mono text-xs">{formatSourceRank(p.dsRank)}</td>
+                      <td className="px-2 py-2 font-mono text-xs">{formatSourceRank(p.adp)}</td>
                       <td className="px-2 py-2">
                         <GapChip fp={p.fpRank} ds={p.dsRank} />
                       </td>

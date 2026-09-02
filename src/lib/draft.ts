@@ -79,6 +79,91 @@ export function blendedRank(player: Player, dsWeight: number) {
   return player.fpRank * (1 - w) + player.dsRank * w;
 }
 
+/** Snapshot / ESPN stub sentinel for "this source has no rank". */
+export const UNRANKED = 900;
+
+export type BoardSort = "blend" | "pos" | "fp" | "ds" | "adp" | "gap";
+
+/** True when a FP/DS rank should not sort as if it were #0 or #1. */
+export function isMissingRank(n: number | undefined | null): boolean {
+  return n == null || !Number.isFinite(n) || n <= 0 || n >= UNRANKED;
+}
+
+export function sourceRank(n: number | undefined | null): number | null {
+  return isMissingRank(n) ? null : (n as number);
+}
+
+/** Nulls last, in both directions — missing ranks never float to the top as #1. */
+export function compareSourceRank(
+  a: number | undefined | null,
+  b: number | undefined | null,
+  sign: number,
+): number {
+  const av = sourceRank(a);
+  const bv = sourceRank(b);
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  return (av - bv) * sign;
+}
+
+function blendOrNull(player: Player, dsWeight: number): number | null {
+  if (isMissingRank(player.fpRank) && isMissingRank(player.dsRank)) return null;
+  const n = blendedRank(player, dsWeight);
+  return Number.isFinite(n) && n > 0 && n < UNRANKED ? n : null;
+}
+
+export function compareBoard(
+  a: Player,
+  b: Player,
+  key: BoardSort,
+  dir: "asc" | "desc",
+  dsWeight: number,
+): number {
+  const sign = dir === "asc" ? 1 : -1;
+  let d = 0;
+  switch (key) {
+    case "pos":
+      d = (POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos)) * sign;
+      break;
+    case "fp":
+      d = compareSourceRank(a.fpRank, b.fpRank, sign);
+      break;
+    case "ds":
+      d = compareSourceRank(a.dsRank, b.dsRank, sign);
+      break;
+    case "adp":
+      d = compareSourceRank(a.adp, b.adp, sign);
+      break;
+    case "gap":
+      d = (sourceGap(a) - sourceGap(b)) * sign;
+      break;
+    default:
+      d = compareSourceRank(blendOrNull(a, dsWeight), blendOrNull(b, dsWeight), sign);
+  }
+  if (d !== 0) return d;
+  const blend = blendedRank(a, dsWeight) - blendedRank(b, dsWeight);
+  if (blend !== 0) return blend * sign;
+  return a.name.localeCompare(b.name);
+}
+
+export function formatSourceRank(n: number | undefined | null): string {
+  const v = sourceRank(n);
+  if (v == null) return "—";
+  return Number.isInteger(v) ? String(v) : v.toFixed(0);
+}
+
+/** Leftmost # cell: the active sort's actual source rank, not a 1..n re-index of visible rows. */
+export function formatBoardRank(player: Player, sortKey: BoardSort, dsWeight: number): string {
+  if (sortKey === "fp") return formatSourceRank(player.fpRank);
+  if (sortKey === "ds") return formatSourceRank(player.dsRank);
+  if (sortKey === "adp") return formatSourceRank(player.adp);
+  const blend = blendOrNull(player, dsWeight);
+  if (blend == null) return "—";
+  const tenths = Math.round(blend * 10) / 10;
+  return Number.isInteger(tenths) ? String(tenths) : tenths.toFixed(1);
+}
+
 export function scoringMult(pos: Position, scoring: Scoring) {
   if (scoring === "ppr") return 1;
   if (scoring === "half") {

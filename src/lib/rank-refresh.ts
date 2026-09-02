@@ -279,7 +279,7 @@ export function parseDraftSharksTable(html: string): Array<{
   while ((m = re.exec(html))) {
     const name = m[2].replace(/\s+/g, " ").trim();
     const rank = Number(m[3]);
-    if (!name || !Number.isFinite(rank)) continue;
+    if (!name || !Number.isFinite(rank) || rank <= 0) continue;
     out.push({ name, rank, pos: m[1] });
   }
   return out;
@@ -437,9 +437,11 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       const id = idFor(p.name, p.pos, p.team);
       if (!id) continue;
       const cur = patches.get(id) ?? {};
-      cur.fpRank = p.rank;
-      patches.set(id, cur);
-      fpMatched += 1;
+      if (p.rank > 0) {
+        cur.fpRank = p.rank;
+        patches.set(id, cur);
+        fpMatched += 1;
+      }
     }
     injuryTotal += absorbHits(
       injuries,
@@ -465,9 +467,11 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       const id = idFor(p.name, p.pos);
       if (!id) continue;
       const cur = patches.get(id) ?? {};
-      cur.dsRank = p.rank;
-      patches.set(id, cur);
-      dsMatched += 1;
+      if (p.rank > 0) {
+        cur.dsRank = p.rank;
+        patches.set(id, cur);
+        dsMatched += 1;
+      }
     }
     injuryTotal += absorbHits(injuries, dsRes.value.injuries, espnSeen, {});
   } else {
@@ -533,6 +537,10 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
   };
 }
 
+function keepRank(next: number | undefined, prev: number) {
+  return typeof next === "number" && Number.isFinite(next) && next > 0 ? next : prev;
+}
+
 export function applyRankPatches(players: Player[], patches: Record<string, RankPatch> | undefined) {
   if (!patches || Object.keys(patches).length === 0) return players;
   return players.map((p) => {
@@ -540,9 +548,9 @@ export function applyRankPatches(players: Player[], patches: Record<string, Rank
     if (!u) return p;
     return {
       ...p,
-      fpRank: u.fpRank ?? p.fpRank,
-      dsRank: u.dsRank ?? p.dsRank,
-      adp: u.adp ?? p.adp,
+      fpRank: keepRank(u.fpRank, p.fpRank),
+      dsRank: keepRank(u.dsRank, p.dsRank),
+      adp: keepRank(u.adp, p.adp),
     };
   });
 }

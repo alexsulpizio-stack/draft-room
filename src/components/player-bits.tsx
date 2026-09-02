@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { isMissingRank } from "@/lib/draft";
 import type { Injury, Player, Position } from "@/lib/types";
 
 export const POS_CLASS: Record<Position, string> = {
@@ -24,6 +25,9 @@ export function PosBadge({ pos }: { pos: Position }) {
 }
 
 export function GapChip({ fp, ds }: { fp: number; ds: number }) {
+  if (isMissingRank(fp) || isMissingRank(ds)) {
+    return <span className="font-mono text-xs text-muted-foreground">—</span>;
+  }
   const gap = fp - ds;
   if (Math.abs(gap) < 3) {
     return <span className="font-mono text-xs text-muted-foreground">even</span>;
