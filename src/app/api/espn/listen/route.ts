@@ -4,10 +4,13 @@ import {
   loadEspnPlayers,
   mapEspnPicks,
   mergeIngestMeta,
+  remapMappedPicks,
+  requestPublicOrigin,
 } from "@/lib/espn";
 import { getIngest } from "@/lib/espn-ingest";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const STALE_MS = 12 * 60 * 1000;
 
@@ -15,6 +18,8 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const fallbackTeams = Number(url.searchParams.get("teams")) || 12;
   const last = getIngest();
+  const publicOrigin = requestPublicOrigin(req);
+  const ingestUrl = publicOrigin ? `${publicOrigin}/api/espn/ingest` : "";
   if (!last) {
     return NextResponse.json({
       ok: true,
@@ -24,6 +29,8 @@ export async function GET(req: Request) {
       picks: [],
       extras: [],
       count: 0,
+      publicOrigin,
+      ingestUrl,
     });
   }
   if (Date.now() - last.ts > STALE_MS) {
@@ -36,12 +43,15 @@ export async function GET(req: Request) {
       extras: [],
       count: 0,
       ts: last.ts,
+      publicOrigin,
+      ingestUrl,
     });
   }
   if (!last.picks.length) {
     return NextResponse.json({
       ok: true,
       ingest: false,
+      connected: true,
       stale: false,
       source: "empty",
       picks: [],
@@ -50,6 +60,9 @@ export async function GET(req: Request) {
       ts: last.ts,
       href: last.href,
       meta: last.meta,
+      reason: last.meta?.reason,
+      publicOrigin,
+      ingestUrl,
     });
   }
 
@@ -57,13 +70,15 @@ export async function GET(req: Request) {
   const teamsCount = meta.teams || fallbackTeams;
   const season = meta.season || 2026;
   const players = await loadEspnPlayers(season);
-  const mapped = mapEspnPicks({
-    picks: last.picks,
-    pickOrder: [],
-    teamsCount,
-    players,
-    draftType: meta.draftType === "linear" ? "linear" : "snake",
-  });
+  const mapped = remapMappedPicks(
+    mapEspnPicks({
+      picks: last.picks,
+      pickOrder: [],
+      teamsCount,
+      players,
+      draftType: meta.draftType === "linear" ? "linear" : "snake",
+    }),
+  );
   return NextResponse.json({
     ok: true,
     ingest: true,
@@ -75,5 +90,7 @@ export async function GET(req: Request) {
     href: last.href,
     ts: last.ts,
     meta: { ...meta, teams: teamsCount },
+    publicOrigin,
+    ingestUrl,
   });
 }

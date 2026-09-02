@@ -1,14 +1,20 @@
 import {
+  bookmarkletOrigin,
   extractEspnDraftPicks,
   extrasFromMapped,
+  ingestCorsHeaders,
+  isEspnDraftNetworkUrl,
   isPlaceholderEspnName,
   isValidEspnPlayerId,
   mapEspnPicks,
   mergeBoardWithEspnExtras,
   mergeEspnPicks,
   mergeLiveEspnFields,
+  remapMappedPicks,
+  snapshotIdForEspnPick,
   stubFromEspn,
 } from "../src/lib/espn";
+import { getIngest, INGEST_PATHS, setIngest } from "../src/lib/espn-ingest";
 import { playerSublineText } from "../src/lib/player-display";
 import { PLAYERS } from "../src/lib/players";
 import type { Player } from "../src/lib/types";
@@ -132,6 +138,83 @@ const merged = mergeEspnPicks(
   [{ overallPickNumber: 1, playerId: -1, teamId: 0, playerName: "ESPN -1" }],
 );
 assert(merged.length === 0, "merge drops unfilled -1 slots");
+
+const gibbs = PLAYERS.find((p) => p.name === "Jahmyr Gibbs");
+assert(gibbs, "snapshot includes Jahmyr Gibbs");
+const noCatalog = mapEspnPicks({
+  picks: [{ overallPickNumber: 1, playerId: 3116406, teamId: 1, playerName: "Jahmyr Gibbs" }],
+  pickOrder: [],
+  teamsCount: 12,
+  players: new Map(),
+});
+assert(
+  noCatalog.length === 1 && noCatalog[0].playerId === gibbs!.id,
+  `name match beats espn-* without catalog, got ${JSON.stringify(noCatalog)}`,
+);
+
+const unmatched = mapEspnPicks({
+  picks: [{ overallPickNumber: 3, playerId: 999000111, teamId: 2, playerName: "Not A Real Player Xyz" }],
+  pickOrder: [],
+  teamsCount: 12,
+  players: new Map(),
+});
+assert(unmatched[0].playerId.startsWith("espn-"), "unknown name stays espn-*");
+assert(
+  snapshotIdForEspnPick({ playerId: "espn-3116406", name: "Jahmyr Gibbs" }) === gibbs!.id,
+  "client fallback remaps espn-* by name",
+);
+assert(
+  remapMappedPicks([{ ...unmatched[0], name: "Jahmyr Gibbs", playerId: "espn-3116406" }])[0]
+    .playerId === gibbs!.id,
+  "remapMappedPicks uses snapshot id",
+);
+
+assert(
+  isEspnDraftNetworkUrl(
+    "https://fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/-99?view=mDraftDetail",
+  ),
+  "negative mock leagueId is a draft URL",
+);
+assert(
+  isEspnDraftNetworkUrl("https://gambit-api.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/1?view=mRoster"),
+  "gambit-api draft URL",
+);
+assert(
+  !isEspnDraftNetworkUrl("https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/players?view=players_wl"),
+  "players_wl is not a draft URL",
+);
+
+const cors = ingestCorsHeaders(
+  new Request("http://127.0.0.1:43173/api/espn/ingest", {
+    headers: { origin: "https://fantasy.espn.com" },
+  }),
+);
+assert(cors["Access-Control-Allow-Origin"] === "https://fantasy.espn.com", "ESPN ACAO echoes origin");
+assert(cors["Access-Control-Allow-Credentials"] === "true", "ESPN CORS allows credentials");
+
+assert(
+  bookmarkletOrigin("http://127.0.0.1:43173", "https://preview.example.com") ===
+    "https://preview.example.com",
+  "bookmarklet prefers public preview over loopback",
+);
+
+setIngest({
+  picks: [{ overallPickNumber: 1, playerId: 3116406, teamId: 1, playerName: "Jahmyr Gibbs" }],
+  ts: Date.now(),
+  href: "https://fantasy.espn.com/football/draft?leagueId=1361349772",
+});
+const stored = getIngest();
+assert(stored?.picks[0]?.playerName === "Jahmyr Gibbs", "ingest persist round-trips");
+assert(
+  INGEST_PATHS.some((p) => {
+    try {
+      return require("node:fs").readFileSync(p, "utf8").includes("Jahmyr Gibbs");
+    } catch {
+      return false;
+    }
+  }),
+  "ingest written to disk",
+);
 
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);

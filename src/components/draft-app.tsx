@@ -63,7 +63,7 @@ import type { DraftPick, DraftType, Injury, LeagueSettings, Player, Position } f
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PlayerSubline, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
-import { mergeBoardWithEspnExtras } from "@/lib/espn";
+import { matchByName, mergeBoardWithEspnExtras } from "@/lib/espn";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
 
@@ -266,7 +266,17 @@ export function DraftApp() {
   const untilUser = picksUntilUser(overall, settings);
   const nextMine = nextUserPick(overall, settings);
 
-  const taken = useMemo(() => new Set(picks.map((p) => p.playerId)), [picks]);
+  const taken = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of picks) {
+      ids.add(p.playerId);
+      if (!p.playerId.startsWith("espn-")) continue;
+      const extra = extras.find((e) => e.id === p.playerId);
+      const named = extra?.name ? matchByName(extra.name) : undefined;
+      if (named) ids.add(named.id);
+    }
+    return ids;
+  }, [picks, extras]);
   const available = useMemo(() => {
     return board.filter((p) => !taken.has(p.id));
   }, [board, taken]);

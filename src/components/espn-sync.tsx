@@ -15,14 +15,17 @@ import {
 } from "@/components/ui/sheet";
 import { pickOwner } from "@/lib/draft";
 import {
+  bookmarkletOrigin,
   buildBookmarklet,
   espnDraftRoomUrl,
   ESPN_LIVE_LOBBY,
   ESPN_MOCK_LOBBY,
   extrasFromMapped,
+  isLoopbackOrigin,
   matchByName,
   parseEspnPickLog,
   patchSettingsFromEspnMeta,
+  remapMappedPicks,
   stubFromEspn,
   type EspnIngestMeta,
   type EspnLeagueInfo,
@@ -85,7 +88,7 @@ function writeConn(next: Conn | null) {
 }
 
 function mappedToDraft(mapped: MappedEspnPick[]): DraftPick[] {
-  return mapped.map((p) => ({
+  return remapMappedPicks(mapped).map((p) => ({
     overall: p.overall,
     team: p.team,
     playerId: p.playerId,
@@ -159,6 +162,7 @@ export function EspnSync({
   const [pasteLog, setPasteLog] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [ingestHint, setIngestHint] = useState<string | null>(null);
+  const [publicOrigin, setPublicOrigin] = useState("");
 
   const connRaw = useSyncExternalStore(subscribeConn, getConnSnap, () => "");
   const conn = useMemo(() => {
@@ -180,12 +184,15 @@ export function EspnSync({
     settingsRef.current = settings;
   });
 
-  const origin = useSyncExternalStore(
+  const pageOrigin = useSyncExternalStore(
     () => () => {},
     () => window.location.origin,
     () => "",
   );
+  const origin = bookmarkletOrigin(pageOrigin, publicOrigin);
   const bookmarkHref = origin ? buildBookmarklet(origin) : "javascript:void(0)";
+  const ingestUrl = origin ? `${origin}/api/espn/ingest` : "";
+  const ingestIsLocal = origin ? isLoopbackOrigin(origin) : false;
   const draftRoomUrl = settings.espnLeagueId
     ? espnDraftRoomUrl(settings.espnLeagueId, season)
     : "";
@@ -315,8 +322,9 @@ export function EspnSync({
         });
         return;
       }
-      const picks = mappedToDraft(json.picks);
-      onPicksRef.current(picks, json.extras ?? extrasFromMapped(json.picks));
+      const remapped = remapMappedPicks(json.picks);
+      const picks = mappedToDraft(remapped);
+      onPicksRef.current(picks, json.extras ?? extrasFromMapped(remapped));
       setStatus({
         live: true,
         source: json.source ?? "espn-api",
@@ -349,9 +357,17 @@ export function EspnSync({
         picks?: MappedEspnPick[];
         extras?: Player[];
         meta?: EspnIngestMeta;
+        reason?: string;
+        publicOrigin?: string;
+        ingestUrl?: string;
       };
+      if (typeof json.publicOrigin === "string" && json.publicOrigin) {
+        setPublicOrigin(json.publicOrigin);
+      }
       if (!json.ingest || !json.picks?.length) {
-        if (!json.ingest) setIngestHint(null);
+        const why = json.reason || json.meta?.reason;
+        if (why) setIngestHint(why);
+        else if (!json.ingest) setIngestHint(null);
         return;
       }
       const meta = json.meta ?? {};
@@ -371,10 +387,11 @@ export function EspnSync({
       ].join("#");
       if (sig === listenSig.current && statusRef.current.live) return;
       listenSig.current = sig;
+      const remapped = remapMappedPicks(json.picks);
       const nextSettings = patchSettingsFromEspnMeta(settingsRef.current, meta);
       onPicksRef.current(
-        mappedToDraft(json.picks),
-        json.extras ?? extrasFromMapped(json.picks),
+        mappedToDraft(remapped),
+        json.extras ?? extrasFromMapped(remapped),
         nextSettings,
       );
       setStatus({
@@ -403,6 +420,19 @@ export function EspnSync({
       window.clearInterval(t);
     };
   }, [pollListen]);
+
+  useEffect(() => {
+    void fetch("/api/espn/ingest", { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ publicOrigin?: string }>)
+      .then((json) => {
+        if (typeof json.publicOrigin === "string" && json.publicOrigin) {
+          setPublicOrigin(json.publicOrigin);
+        }
+      })
+      .catch(() => {
+        /* listen poll will retry */
+      });
+  }, []);
 
   const applyPaste = () => {
     const raw = parseEspnPickLog(pasteLog, settings.teams);
@@ -468,7 +498,11 @@ export function EspnSync({
     <>
       <BookmarkletAnchor
         bookmarklet={bookmarkHref}
-        title="Drag this onto the bookmarks bar, then click it on the ESPN draft tab. Click here for the two-step setup."
+        title={
+          ingestUrl
+            ? `Drag onto the bookmarks bar, then click it on ESPN. Posts to ${ingestUrl}`
+            : "Drag this onto the bookmarks bar, then click it on the ESPN draft tab."
+        }
         onClick={(e) => {
           e.preventDefault();
           openSheet();
@@ -504,8 +538,9 @@ export function EspnSync({
             <SheetTitle>Sync any ESPN draft</SheetTitle>
             <SheetDescription>
               Drag the chip to your bookmarks bar, then click it on whatever ESPN draft tab is live
-              — JFL 28, another league, or a mock. Re-drag after Draft Room updates so the bookmark
-              still sees nested ESPN pick IDs. Leave that ESPN tab open.
+              — JFL 28, another league, or a mock. Re-drag Sync ESPN after this update so the
+              bookmark posts to this Draft Room and explains empty captures. Leave that ESPN tab
+              open.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">
@@ -541,15 +576,28 @@ export function EspnSync({
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                   Drag the green chip onto the bookmarks bar. Press Ctrl+Shift+B if the bar is hidden.
+                  Re-drag after every Draft Room update.
                 </p>
                 <BookmarkletAnchor
                   bookmarklet={bookmarkHref}
                   onClick={(e) => e.preventDefault()}
+                  title={ingestUrl ? `Posts to ${ingestUrl}` : undefined}
                   className="mt-3 inline-flex cursor-grab items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground no-underline shadow-sm active:cursor-grabbing"
                 >
                   <Radio className="size-4" />
                   Sync ESPN
                 </BookmarkletAnchor>
+                {ingestUrl ? (
+                  <p className="mt-2 break-all font-mono text-[10px] leading-relaxed text-muted-foreground">
+                    Ingest URL: {ingestUrl}
+                  </p>
+                ) : null}
+                {ingestIsLocal ? (
+                  <p className="mt-1 text-xs text-destructive">
+                    This URL is localhost. Drag Sync ESPN from the same Draft Room preview tab you
+                    keep open — ESPN on your PC cannot reach a Cloud VM at 127.0.0.1.
+                  </p>
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -558,7 +606,7 @@ export function EspnSync({
                   onClick={() => void copyText(bookmarkHref, "bookmark")}
                 >
                   {copied === "bookmark" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copied === "bookmark" ? "Copied" : "Copy instead"}
+                  {copied === "bookmark" ? "Copied bookmarklet" : "Copy bookmarklet"}
                 </Button>
               </li>
               <li className="rounded-xl border border-border bg-card p-3">

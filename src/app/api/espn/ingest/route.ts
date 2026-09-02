@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
+import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function cors(req: Request, body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: ingestCorsHeaders(req) });
@@ -36,6 +37,8 @@ export async function GET(req: Request) {
     ts: last?.ts ?? null,
     href: last?.href,
     meta: last?.meta,
+    publicOrigin: requestPublicOrigin(req),
+    ingestUrl: `${requestPublicOrigin(req)}/api/espn/ingest`,
   });
 }
 

@@ -18,6 +18,8 @@ export type EspnIngestMeta = {
   leagueName?: string;
   draftType?: DraftType;
   teamNames?: string[];
+  /** Bookmarklet 0-pick reason: no leagueId / 0 filled slots / ESPN 401. */
+  reason?: string;
 };
 
 export function espnLeagueHomeUrl(leagueId: string, season = 2026) {
@@ -921,7 +923,26 @@ export function extractEspnDraftPicks(json: unknown): EspnRawPick[] {
 export function isEspnDraftNetworkUrl(url: string): boolean {
   const u = String(url || "");
   if (/\/players\?|view=players_wl/i.test(u)) return false;
-  return /mDraftDetail|draftDetail|mRoster|\/leagues\/\d+|leagueHistory\/\d+/i.test(u);
+  return /mDraftDetail|mDraft(?:[^A-Za-z]|$)|draftDetail|draftRecap|draftStatus|mRoster|\/leagues\/-?\d+|leagueHistory\/-?\d+|\/drafts\/\d+|gambit-api|livedraft|recentActivity/i.test(
+    u,
+  );
+}
+
+/** If listen mapped to `espn-4241457` but the name is on the board, use the snapshot id for taken. */
+export function snapshotIdForEspnPick(p: { playerId: string; name?: string }): string {
+  if (!p.playerId.startsWith("espn-")) return p.playerId;
+  if (p.name && !isPlaceholderEspnName(p.name)) {
+    const named = matchByName(p.name);
+    if (named) return named.id;
+  }
+  return p.playerId;
+}
+
+export function remapMappedPicks(mapped: MappedEspnPick[]): MappedEspnPick[] {
+  return mapped.map((p) => {
+    const id = snapshotIdForEspnPick(p);
+    return id === p.playerId ? p : { ...p, playerId: id };
+  });
 }
 
 export function rawPicksFromDetail(payload: EspnLeaguePayload): EspnRawPick[] {
@@ -989,6 +1010,10 @@ export function mapEspnPicks(args: {
       });
       let ourId = meta?.ourId ?? (name ? matchOurPlayer(name, pos, live.team) : null) ?? snapshot?.id ?? null;
       if (!ourId) ourId = unmatchedEspnId(name, p.overallPickNumber, espnId);
+      if (ourId.startsWith("espn-") && name) {
+        const named = matchByName(name);
+        if (named) ourId = named.id;
+      }
       if (usedIds.has(ourId)) ourId = unmatchedEspnId(name, p.overallPickNumber) + `-p${p.overallPickNumber}`;
       usedIds.add(ourId);
       const orderIdx = p.teamId ? pickOrder.indexOf(p.teamId) : -1;
@@ -1154,23 +1179,61 @@ export async function fetchEspnLeague(args: {
   return { ok: true, status: res.status, payload: json as EspnLeaguePayload };
 }
 
+export function isEspnBrowserOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return host === "espn.com" || host.endsWith(".espn.com");
+  } catch {
+    return false;
+  }
+}
+
+export function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+/** Prefer a public preview host when the page itself is 127.0.0.1 (Cloud Agent). */
+export function bookmarkletOrigin(pageOrigin: string, publicOrigin?: string): string {
+  const page = (pageOrigin || "").replace(/\/$/, "");
+  const pub = (publicOrigin || "").replace(/\/$/, "");
+  if (isLoopbackOrigin(page) && pub && !isLoopbackOrigin(pub)) return pub;
+  return page;
+}
+
+export function requestPublicOrigin(req: Request): string {
+  const url = new URL(req.url);
+  const proto = (req.headers.get("x-forwarded-proto") || url.protocol.replace(":", "") || "http")
+    .split(",")[0]
+    .trim();
+  const host = (req.headers.get("x-forwarded-host") || req.headers.get("host") || url.host)
+    .split(",")[0]
+    .trim();
+  if (!host) return "";
+  return `${proto}://${host}`.replace(/\/$/, "");
+}
+
 export function ingestCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") ?? "";
-  let host = "";
-  try {
-    host = origin ? new URL(origin).hostname : "";
-  } catch {
-    host = "";
-  }
-  const espn = /(^|\.)espn\.com$/i.test(host);
-  return {
-    "Access-Control-Allow-Origin": espn ? origin : "*",
+  const espn = isEspnBrowserOrigin(origin);
+  // Echo the browser Origin so ESPN pages can POST ingest (ACAO cannot be * with credentials).
+  const allowOrigin = origin && origin !== "null" ? origin : "*";
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Private-Network": "true",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
+  if (espn || (allowOrigin !== "*" && origin)) {
+    headers["Access-Control-Allow-Credentials"] = "true";
+  }
+  return headers;
 }
 
 export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
@@ -1218,9 +1281,18 @@ function takeSize(n){n=Number(n);return (n>=2&&n<=20)?n:0;}
 function urlMeta(){
   var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null,slot:0};
   try{
+    var href=String(location.href||"");
     var sp=new URLSearchParams(location.search);
     meta.leagueId=sp.get("leagueId")||"";
+    if(!meta.leagueId){
+      var lm=href.match(/[?&#/](?:leagueId=|leagues\\/|league\\/)(-?\\d+)/i);
+      if(lm) meta.leagueId=lm[1];
+    }
     meta.season=Number(sp.get("seasonId")||0)||0;
+    if(!meta.season){
+      var sm=href.match(/seasonId=(\\d{4})/i);
+      if(sm) meta.season=Number(sm[1]);
+    }
     meta.teamId=Number(sp.get("teamId")||0)||0;
   }catch(e){}
   return meta;
@@ -1337,17 +1409,32 @@ function isLeaguePayload(json){
   json=unwrap(json);
   return !!(json&&typeof json==="object"&&(json.draftDetail||json.draft||(json.settings&&json.teams)||(Array.isArray(json.picks)&&json.picks[0]&&(json.picks[0].overallPickNumber||json.picks[0].player||json.picks[0].playerId))));
 }
+function emptyWhy(meta,err){
+  if(err) return String(err);
+  if(!meta||!meta.leagueId) return "no leagueId in this URL";
+  return "0 filled slots";
+}
 function badge(n,meta,err){
   var b=document.getElementById("draft-room-sync");
   if(!b){
     b=document.createElement("div");
     b.id="draft-room-sync";
-    b.style.cssText="position:fixed;bottom:16px;left:16px;z-index:2147483647;background:#1f6a45;color:#fff;padding:10px 14px;border-radius:12px;font:13px/1.35 system-ui,sans-serif;box-shadow:0 8px 24px #0005;max-width:280px";
+    b.style.cssText="position:fixed;bottom:16px;left:16px;z-index:2147483647;background:#1f6a45;color:#fff;padding:10px 14px;border-radius:12px;font:13px/1.35 system-ui,sans-serif;box-shadow:0 8px 24px #0005;max-width:360px";
     document.body.appendChild(b);
   }
-  b.style.background=err?"#9b1c1c":"#1f6a45";
+  var why=err?String(err):"";
+  var fail=!!why||!n;
+  b.style.background=fail?"#9b1c1c":"#1f6a45";
   var label=(meta&&meta.leagueName)?meta.leagueName:(meta&&meta.leagueId)?("League "+meta.leagueId):"this ESPN draft";
-  b.textContent=err?("Draft Room · "+err):("Draft Room is syncing "+n+" picks from "+label+". Leave this tab open.");
+  if(why&&n){
+    b.textContent="Draft Room · "+n+" picks captured, ingest failed: "+why+". Posts to "+O+"/api/espn/ingest";
+    return;
+  }
+  if(fail){
+    b.textContent="Draft Room · 0 picks — "+(why||emptyWhy(meta))+". Posts to "+O+"/api/espn/ingest";
+    return;
+  }
+  b.textContent="Draft Room is syncing "+n+" picks from "+label+". Posts to "+O+"/api/espn/ingest";
 }
 function idle(fn){
   if(typeof requestIdleCallback==="function") requestIdleCallback(function(){fn();},{timeout:1500});
@@ -1359,9 +1446,20 @@ function flushPending(){
   var n=pending; pending=null;
   post(n.picks,n.meta);
 }
-function post(picks,meta){
+function post(picks,meta,err){
   lastMeta=meta;
-  if(!picks||!picks.length){ badge(0,meta); return; }
+  if(!picks||!picks.length){
+    var why=emptyWhy(meta,err);
+    var hmeta={};
+    for(var k in (meta||{})) hmeta[k]=meta[k];
+    hmeta.reason=why;
+    badge(0,hmeta,why);
+    var hsig="0:"+why+":"+(meta&&meta.leagueId||"");
+    if(hsig===lastSig) return;
+    lastSig=hsig;
+    fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({picks:[],href:location.href,title:document.title,ts:Date.now(),meta:hmeta}),mode:"cors",keepalive:true}).catch(function(){});
+    return;
+  }
   var sig=picks.length+":"+picks[picks.length-1].overallPickNumber+":"+picks[picks.length-1].playerId+":"+(meta.teams||"")+":"+(meta.leagueId||"");
   if(sig===lastSig){ badge(picks.length,meta); return; }
   if(sending){ pending={picks:picks,meta:meta}; return; }
@@ -1390,11 +1488,35 @@ function ingestJson(json){
 function draftUrl(u){
   u=String(u||"");
   if(/\\/players\\?|view=players_wl/i.test(u)) return false;
-  return /mDraftDetail|draftDetail|mRoster|\\/leagues\\/-?\\d+|leagueHistory|\\/drafts\\/\\d+/i.test(u);
+  return /mDraftDetail|mDraft(?:[^A-Za-z]|$)|draftDetail|draftRecap|draftStatus|mRoster|\\/leagues\\/-?\\d+|leagueHistory|\\/drafts\\/\\d+|gambit-api|livedraft|recentActivity/i.test(u);
+}
+function hookWs(){
+  var WS=window.WebSocket;
+  if(typeof WS!=="function"||WS.__draftRoomEspn) return;
+  function Wrapped(url,proto){
+    var ws=proto!==undefined?new WS(url,proto):new WS(url);
+    try{
+      ws.addEventListener("message",function(ev){
+        idle(function(){
+          try{
+            var raw=ev&&ev.data;
+            if(typeof raw!=="string"||raw.length>2000000) return;
+            var json=JSON.parse(raw);
+            ingestJson(json);
+          }catch(e){}
+        });
+      });
+    }catch(e){}
+    return ws;
+  }
+  Wrapped.prototype=WS.prototype;
+  Wrapped.__draftRoomEspn=1;
+  window.WebSocket=Wrapped;
 }
 function hookNet(){
   if(window.__draftRoomEspnHooked) return;
   window.__draftRoomEspnHooked=1;
+  hookWs();
   var ofetch=window.fetch;
   if(typeof ofetch==="function"){
     window.fetch=function(){
@@ -1426,13 +1548,19 @@ function hookNet(){
 }
 function pullApi(){
   var meta=urlMeta();
-  if(!meta.leagueId){ badge(0,lastMeta||meta); return; }
-  var views="view=mDraftDetail&view=mRoster&view=mSettings&view=mTeam";
-  var path="/apis/v3/games/ffl/seasons/"+(meta.season||2026)+"/segments/0/leagues/"+meta.leagueId+"?"+views;
-  var urls=[location.origin+path,"https://fantasy.espn.com"+path,API+"/seasons/"+(meta.season||2026)+"/segments/0/leagues/"+meta.leagueId+"?"+views];
-  var i=0;
+  if(!meta.leagueId){ post([],lastMeta||meta,"no leagueId in this URL"); return; }
+  var views="view=mDraftDetail&view=mRoster&view=mSettings&view=mTeam&view=draftRecap";
+  var season=meta.season||2026;
+  var path="/apis/v3/games/ffl/seasons/"+season+"/segments/0/leagues/"+meta.leagueId+"?"+views;
+  var urls=[location.origin+path,"https://fantasy.espn.com"+path,"https://gambit-api.fantasy.espn.com"+path,API+"/seasons/"+season+"/segments/0/leagues/"+meta.leagueId+"?"+views];
+  var i=0,lastErr="";
   function tryNext(){
-    if(i>=urls.length){ badge((lastSig&&Number(lastSig.split(":")[0]))||0,lastMeta||meta); return; }
+    if(i>=urls.length){
+      var n=(lastSig&&lastSig.charAt(0)!=="0"&&Number(lastSig.split(":")[0]))||0;
+      if(n){ badge(n,lastMeta||meta); return; }
+      post([],lastMeta||meta,lastErr||"0 filled slots");
+      return;
+    }
     var url=urls[i++];
     var ctrl=typeof AbortController==="function"?new AbortController():null;
     var t=setTimeout(function(){try{ctrl&&ctrl.abort();}catch(e){}},8000);
@@ -1440,8 +1568,9 @@ function pullApi(){
       clearTimeout(t);
       if(!r.ok) throw new Error("ESPN "+r.status);
       return r.json();
-    }).then(function(json){ ingestJson(json); }).catch(function(){
+    }).then(function(json){ ingestJson(json); }).catch(function(e){
       clearTimeout(t);
+      lastErr=String((e&&e.message)||e||"ESPN failed");
       tryNext();
     });
   }

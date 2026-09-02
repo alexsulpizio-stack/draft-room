@@ -43,3 +43,6 @@ next-env.d.ts
 # cloud agent scratch
 /agent-tools
 
+# ESPN room-capture persist (also written to /tmp)
+.data/
+

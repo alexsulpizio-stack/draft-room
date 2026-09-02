@@ -9,6 +9,7 @@ import {
   parseEspnLeague,
   parseLeagueId,
   rawPicksFromDetail,
+  remapMappedPicks,
 } from "@/lib/espn";
 import { getIngest } from "@/lib/espn-ingest";
 
@@ -44,14 +45,16 @@ export async function POST(req: Request) {
 
   if (!fetched.ok || !fetched.payload) {
     if (ingest?.picks.length) {
-      const mapped = mapEspnPicks({
-        picks: ingest.picks,
-        pickOrder: [],
-        teamsCount: ingest.meta?.teams || Number(body.teams) || 12,
-        players,
-        draftType:
-          ingest.meta?.draftType === "linear" || body.draftType === "linear" ? "linear" : "snake",
-      });
+      const mapped = remapMappedPicks(
+        mapEspnPicks({
+          picks: ingest.picks,
+          pickOrder: [],
+          teamsCount: ingest.meta?.teams || Number(body.teams) || 12,
+          players,
+          draftType:
+            ingest.meta?.draftType === "linear" || body.draftType === "linear" ? "linear" : "snake",
+        }),
+      );
       return NextResponse.json({
         ok: true,
         inProgress: true,
@@ -85,13 +88,15 @@ export async function POST(req: Request) {
   });
   const apiPicks = rawPicksFromDetail(fetched.payload);
   const merged = mergeEspnPicks(apiPicks, ingest?.picks ?? []);
-  const mapped = mapEspnPicks({
-    picks: merged,
-    pickOrder: info.pickOrder,
-    teamsCount: info.settings.teams,
-    players,
-    draftType: info.draftType,
-  });
+  const mapped = remapMappedPicks(
+    mapEspnPicks({
+      picks: merged,
+      pickOrder: info.pickOrder,
+      teamsCount: info.settings.teams,
+      players,
+      draftType: info.draftType,
+    }),
+  );
 
   const source =
     apiPicks.length >= merged.length && apiPicks.length > 0
