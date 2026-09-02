@@ -363,7 +363,6 @@ export function EspnSync({
           meta.teams ? ` · ${meta.teams} teams` : ""
         }.`,
       );
-      if (readConn()?.live) return;
       const sig = [
         json.picks.map((p) => `${p.overall}:${p.playerId}`).join("|"),
         meta.leagueId ?? "",
@@ -505,7 +504,8 @@ export function EspnSync({
             <SheetTitle>Sync any ESPN draft</SheetTitle>
             <SheetDescription>
               Drag the chip to your bookmarks bar, then click it on whatever ESPN draft tab is live
-              — JFL 28, another league, or a mock. Draft Room reads that page.
+              — JFL 28, another league, or a mock. Re-drag after Draft Room updates so the bookmark
+              still sees nested ESPN pick IDs. Leave that ESPN tab open.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">

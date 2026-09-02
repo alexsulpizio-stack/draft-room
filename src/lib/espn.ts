@@ -247,9 +247,9 @@ export type EspnLeagueInfo = {
 
 export function parseLeagueId(input: string): string | null {
   const trimmed = input.trim();
-  const fromQuery = trimmed.match(/[?&]leagueId=(\d+)/i);
+  const fromQuery = trimmed.match(/[?&]leagueId=(-?\d+)/i);
   if (fromQuery) return fromQuery[1];
-  const fromPath = trimmed.match(/leagues\/(\d+)/i);
+  const fromPath = trimmed.match(/leagues\/(-?\d+)/i);
   if (fromPath) return fromPath[1];
   if (/^\d+$/.test(trimmed)) return trimmed;
   return null;
@@ -713,7 +713,7 @@ export function parseEspnLeague(
     return t?.name ?? `Team ${i + 1}`;
   });
 
-  const apiPicks = (payload.draftDetail?.picks ?? []).filter((p) => isValidEspnPlayerId(p.playerId));
+  const apiPicks = extractEspnDraftPicks(payload);
 
   return {
     leagueId: args.leagueId,
@@ -743,18 +743,189 @@ export function parseEspnLeague(
   };
 }
 
+type LooseEspn = Record<string, unknown>;
+
+function asRecord(v: unknown): LooseEspn | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as LooseEspn) : null;
+}
+
+/** League history returns `[{...}]`; some live clients wrap `{ data: {...} }`. */
+export function unwrapEspnPayload(json: unknown): LooseEspn | null {
+  if (Array.isArray(json)) {
+    const first = json.find((x) => asRecord(x));
+    return asRecord(first);
+  }
+  const root = asRecord(json);
+  if (!root) return null;
+  const data = asRecord(root.data);
+  if (data && (data.draftDetail || data.picks || data.players || data.teams || data.settings)) {
+    return data;
+  }
+  return root;
+}
+
+function espnPickPlayerId(p: LooseEspn): number {
+  const direct = Number(p.playerId);
+  if (direct > 0) return direct;
+  const nested = asRecord(p.player);
+  const nestedId = Number(nested?.id);
+  if (nestedId > 0) return nestedId;
+  const athlete = Number(p.athleteId);
+  if (athlete > 0) return athlete;
+  const id = Number(p.id);
+  const overall = Number(p.overallPickNumber ?? p.overall ?? 0);
+  if (id > 1000 && id !== overall) return id;
+  return 0;
+}
+
+function espnPickName(p: LooseEspn, names: Map<number, string>): string {
+  const nested = asRecord(p.player);
+  let name = String(
+    p.playerName ||
+      p.fullName ||
+      nested?.fullName ||
+      nested?.name ||
+      `${nested?.firstName ?? ""} ${nested?.lastName ?? ""}`.trim() ||
+      "",
+  ).trim();
+  if (isPlaceholderEspnName(name)) name = "";
+  const pid = espnPickPlayerId(p);
+  if (!name && pid && names.has(pid)) name = names.get(pid) ?? "";
+  return name;
+}
+
+function collectEspnPlayerNames(root: LooseEspn): Map<number, string> {
+  const map = new Map<number, string>();
+  const addList = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const e of list) {
+      const row = asRecord(e);
+      if (!row) continue;
+      const player = asRecord(row.player);
+      const ppe = asRecord(row.playerPoolEntry);
+      const inner = player || asRecord(ppe?.player) || ppe;
+      const id = Number(row.id || row.playerId || inner?.id || 0);
+      const name = String(
+        row.fullName ||
+          row.playerName ||
+          inner?.fullName ||
+          inner?.name ||
+          `${inner?.firstName ?? ""} ${inner?.lastName ?? ""}`.trim() ||
+          "",
+      ).trim();
+      if (id > 0 && name && !isPlaceholderEspnName(name)) map.set(id, name);
+    }
+  };
+  addList(root.players);
+  addList(root.playerPool);
+  if (Array.isArray(root.teams)) {
+    for (const t of root.teams) {
+      const team = asRecord(t);
+      const roster = asRecord(team?.roster);
+      addList(roster?.entries);
+    }
+  }
+  return map;
+}
+
+function picksFromEspnArray(raw: unknown, names: Map<number, string>): EspnRawPick[] {
+  if (!Array.isArray(raw)) return [];
+  const out: EspnRawPick[] = [];
+  for (const item of raw) {
+    const p = asRecord(item);
+    if (!p) continue;
+    const overall = Number(p.overallPickNumber ?? p.overall ?? p.pickNumber ?? 0);
+    const playerId = espnPickPlayerId(p);
+    const name = espnPickName(p, names);
+    if (!overall || (!playerId && !name)) continue;
+    const teamObj = asRecord(p.team);
+    out.push({
+      overallPickNumber: overall,
+      playerId,
+      teamId: Number(p.teamId ?? teamObj?.id ?? p.team ?? 0),
+      playerName: name || undefined,
+    });
+  }
+  return out;
+}
+
+function picksFromEspnRosters(root: LooseEspn, names: Map<number, string>): EspnRawPick[] {
+  const out: EspnRawPick[] = [];
+  const seen = new Set<string>();
+  const push = (playerId: number, teamId: number, name: string) => {
+    if (!playerId && !name) return;
+    const key = playerId > 0 ? `id:${playerId}` : `n:${normalizePlayerName(name)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      overallPickNumber: out.length + 1,
+      playerId,
+      teamId,
+      playerName: name || undefined,
+    });
+  };
+  if (Array.isArray(root.teams)) {
+    for (const t of root.teams) {
+      const team = asRecord(t);
+      if (!team) continue;
+      const teamId = Number(team.id ?? 0);
+      const roster = asRecord(team.roster);
+      if (!Array.isArray(roster?.entries)) continue;
+      for (const e of roster.entries) {
+        const row = asRecord(e);
+        if (!row) continue;
+        const ppe = asRecord(row.playerPoolEntry) ?? row;
+        const playerId = espnPickPlayerId({ ...ppe, playerId: row.playerId ?? ppe.playerId });
+        const name = espnPickName({ ...ppe, playerId }, names);
+        push(playerId, teamId, name);
+      }
+    }
+  }
+  if (!out.length && Array.isArray(root.players)) {
+    for (const e of root.players) {
+      const row = asRecord(e);
+      if (!row) continue;
+      const onTeam = Number(row.onTeamId ?? 0);
+      if (!(onTeam > 0)) continue;
+      push(espnPickPlayerId(row), onTeam, espnPickName(row, names));
+    }
+  }
+  return out;
+}
+
+/**
+ * Live ESPN rooms often omit `playerName` on `draftDetail.picks`, wrap history in an array,
+ * nest `player: { id, fullName }`, or only show drafted players on rosters / `onTeamId`.
+ * Empty slots (`playerId` 0/-1 and no real name) are dropped.
+ */
+export function extractEspnDraftPicks(json: unknown): EspnRawPick[] {
+  const root = unwrapEspnPayload(json);
+  if (!root) return [];
+  const names = collectEspnPlayerNames(root);
+  const detail = asRecord(root.draftDetail);
+  const draft = asRecord(root.draft);
+  const fromDetail = picksFromEspnArray(
+    detail?.picks ?? root.picks ?? draft?.picks,
+    names,
+  );
+  const filled = fromDetail.filter(
+    (p) => isValidEspnPlayerId(p.playerId) || (Boolean(p.playerName) && !isPlaceholderEspnName(p.playerName)),
+  );
+  if (filled.length) {
+    return filled.sort((a, b) => a.overallPickNumber - b.overallPickNumber);
+  }
+  return picksFromEspnRosters(root, names);
+}
+
+/** True for ESPN league/draft XHR — not the giant `players_wl` catalog. */
+export function isEspnDraftNetworkUrl(url: string): boolean {
+  const u = String(url || "");
+  if (/\/players\?|view=players_wl/i.test(u)) return false;
+  return /mDraftDetail|draftDetail|mRoster|\/leagues\/\d+|leagueHistory\/\d+/i.test(u);
+}
+
 export function rawPicksFromDetail(payload: EspnLeaguePayload): EspnRawPick[] {
-  const picks = payload.draftDetail?.picks ?? [];
-  return picks
-    .filter((p) => isValidEspnPlayerId(p.playerId))
-    .map((p) => ({
-      overallPickNumber: Number(p.overallPickNumber ?? 0),
-      playerId: Number(p.playerId),
-      teamId: Number(p.teamId ?? 0),
-      roundId: p.roundId,
-    }))
-    .filter((p) => p.overallPickNumber > 0)
-    .sort((a, b) => a.overallPickNumber - b.overallPickNumber);
+  return extractEspnDraftPicks(payload);
 }
 
 export function mergeEspnPicks(api: EspnRawPick[], ingest: EspnRawPick[]): EspnRawPick[] {
@@ -800,8 +971,13 @@ export function mapEspnPicks(args: {
     .map((p) => {
       const espnId = espnPlayerIdOrZero(p.playerId);
       const meta = espnId ? players.get(espnId) : undefined;
-      const rawName = p.playerName && !isPlaceholderEspnName(p.playerName) ? p.playerName : undefined;
-      const name = rawName || meta?.name || (espnId ? `Player ${espnId}` : "");
+      const rawName =
+        p.playerName &&
+        !isPlaceholderEspnName(p.playerName) &&
+        !/^player\s+\d+$/i.test(p.playerName.trim())
+          ? p.playerName
+          : undefined;
+      const name = rawName || meta?.name || "";
       const snapshot =
         (name ? matchByName(name) : undefined) ??
         (meta?.ourId ? PLAYER_BY_ID.get(meta.ourId) : undefined);
@@ -914,7 +1090,12 @@ export async function loadEspnPlayers(
   if (cookie) headers.Cookie = cookie;
   const res = await fetch(url, { headers, cache: "no-store" });
   if (!res.ok) return playerCache?.byId ?? new Map();
-  const list = (await res.json()) as Array<{
+  const raw: unknown = await res.json();
+  const list = (Array.isArray(raw)
+    ? raw
+    : asRecord(raw)?.players && Array.isArray(asRecord(raw)?.players)
+      ? (asRecord(raw)!.players as unknown[])
+      : []) as Array<{
     id: number;
     fullName?: string;
     defaultPositionId?: number;
@@ -952,7 +1133,7 @@ export async function fetchEspnLeague(args: {
   season: number;
   cookie?: string;
 }): Promise<{ ok: boolean; status: number; payload?: EspnLeaguePayload; error?: string; needAuth?: boolean }> {
-  const views = ["mDraftDetail", "mSettings", "mTeam"].map((v) => `view=${v}`).join("&");
+  const views = ["mDraftDetail", "mRoster", "mSettings", "mTeam"].map((v) => `view=${v}`).join("&");
   const url = `${ESPN_API}/seasons/${args.season}/segments/0/leagues/${args.leagueId}?${views}`;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (args.cookie) headers.Cookie = args.cookie;
@@ -1075,26 +1256,86 @@ function applyLeague(json,meta){
   if(!meta.teams) meta.teams=12;
   return meta;
 }
-function takePicks(json){
-  var raw=(json&&json.draftDetail&&json.draftDetail.picks)||(json&&json.picks)||[];
-  if(!Array.isArray(raw)) return [];
-  var out=[],i,p,overall,playerId,name;
-  for(i=0;i<raw.length;i++){
-    p=raw[i];
-    if(!p||typeof p!=="object") continue;
-    overall=Number(p.overallPickNumber||p.overall||0);
-    playerId=Number(p.playerId||0);
-    if(!(playerId>0)) playerId=0;
-    name=p.playerName||p.fullName||"";
-    if(/^ESPN\s+-?\d+$/i.test(name)&&!(playerId>0)) name="";
-    if(!overall||(!playerId&&!name)) continue;
-    out.push({overallPickNumber:overall,playerId:playerId,teamId:Number(p.teamId||0),playerName:name});
+function unwrap(json){
+  if(Array.isArray(json)){
+    for(var i=0;i<json.length;i++) if(json[i]&&typeof json[i]==="object") return json[i];
+    return null;
   }
-  out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
+  if(json&&json.data&&typeof json.data==="object"&&(json.data.draftDetail||json.data.teams||json.data.picks||json.data.settings)) return json.data;
+  return json;
+}
+function pid(p){
+  var n=Number(p.playerId||0); if(n>0) return n;
+  if(p.player&&typeof p.player==="object"){ n=Number(p.player.id||0); if(n>0) return n; }
+  n=Number(p.athleteId||0); if(n>0) return n;
+  return 0;
+}
+function nameMap(json){
+  var m={};
+  function add(list){
+    if(!Array.isArray(list)) return;
+    for(var i=0;i<list.length;i++){
+      var e=list[i]; if(!e||typeof e!=="object") continue;
+      var pl=e.player||(e.playerPoolEntry&&e.playerPoolEntry.player)||e;
+      var id=Number(e.id||e.playerId||(pl&&pl.id)||0);
+      var nm=e.fullName||e.playerName||(pl&&(pl.fullName||pl.name))||"";
+      if(id>0&&nm&&!/^ESPN\s+-?\d+$/i.test(nm)) m[id]=nm;
+    }
+  }
+  add(json.players);
+  if(Array.isArray(json.teams)){
+    for(var t=0;t<json.teams.length;t++){
+      var roster=json.teams[t]&&json.teams[t].roster;
+      add(roster&&roster.entries);
+    }
+  }
+  return m;
+}
+function pname(p,names){
+  var n="",pl=p.player;
+  if(pl&&typeof pl==="object") n=pl.fullName||pl.name||((pl.firstName||"")+" "+(pl.lastName||"")).trim();
+  n=p.playerName||p.fullName||n||"";
+  if(/^ESPN\s+-?\d+$/i.test(n)) n="";
+  var id=pid(p);
+  if(!n&&id&&names[id]) n=names[id];
+  return n;
+}
+function takePicks(json){
+  json=unwrap(json); if(!json) return [];
+  var names=nameMap(json);
+  var raw=(json.draftDetail&&json.draftDetail.picks)||json.picks||(json.draft&&json.draft.picks)||[];
+  var out=[],i,p,overall,playerId,name,team;
+  if(Array.isArray(raw)){
+    for(i=0;i<raw.length;i++){
+      p=raw[i]; if(!p||typeof p!=="object") continue;
+      overall=Number(p.overallPickNumber||p.overall||p.pickNumber||0);
+      playerId=pid(p);
+      name=pname(p,names);
+      if(!overall||(!playerId&&!name)) continue;
+      team=p.team&&typeof p.team==="object"?p.team.id:p.teamId;
+      out.push({overallPickNumber:overall,playerId:playerId,teamId:Number(team||0),playerName:name});
+    }
+  }
+  if(out.length){ out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;}); return out; }
+  if(Array.isArray(json.teams)){
+    for(i=0;i<json.teams.length;i++){
+      team=json.teams[i]; if(!team) continue;
+      var entries=team.roster&&team.roster.entries; if(!Array.isArray(entries)) continue;
+      for(var j=0;j<entries.length;j++){
+        p=entries[j]; if(!p||typeof p!=="object") continue;
+        var ppe=p.playerPoolEntry||p;
+        playerId=pid({playerId:p.playerId||ppe.playerId,player:ppe.player||p.player,athleteId:ppe.athleteId});
+        name=pname({player:ppe.player||p.player,playerName:p.playerName,playerId:playerId},names);
+        if(!playerId&&!name) continue;
+        out.push({overallPickNumber:out.length+1,playerId:playerId,teamId:Number(team.id||0),playerName:name});
+      }
+    }
+  }
   return out;
 }
 function isLeaguePayload(json){
-  return !!(json&&typeof json==="object"&&(json.draftDetail||(json.settings&&json.teams)||(Array.isArray(json.picks)&&json.picks[0]&&json.picks[0].overallPickNumber)));
+  json=unwrap(json);
+  return !!(json&&typeof json==="object"&&(json.draftDetail||json.draft||(json.settings&&json.teams)||(Array.isArray(json.picks)&&json.picks[0]&&(json.picks[0].overallPickNumber||json.picks[0].player||json.picks[0].playerId))));
 }
 function badge(n,meta,err){
   var b=document.getElementById("draft-room-sync");
@@ -1112,13 +1353,18 @@ function idle(fn){
   if(typeof requestIdleCallback==="function") requestIdleCallback(function(){fn();},{timeout:1500});
   else setTimeout(fn,0);
 }
-var sending=false,lastSig="",lastMeta=urlMeta();
+var sending=false,lastSig="",lastMeta=urlMeta(),pending=null;
+function flushPending(){
+  if(!pending) return;
+  var n=pending; pending=null;
+  post(n.picks,n.meta);
+}
 function post(picks,meta){
   lastMeta=meta;
   if(!picks||!picks.length){ badge(0,meta); return; }
   var sig=picks.length+":"+picks[picks.length-1].overallPickNumber+":"+picks[picks.length-1].playerId+":"+(meta.teams||"")+":"+(meta.leagueId||"");
   if(sig===lastSig){ badge(picks.length,meta); return; }
-  if(sending) return;
+  if(sending){ pending={picks:picks,meta:meta}; return; }
   sending=true;
   lastSig=sig;
   var body=JSON.stringify({picks:picks,href:location.href,title:document.title,ts:Date.now(),meta:meta});
@@ -1126,20 +1372,25 @@ function post(picks,meta){
     sending=false;
     if(!r.ok) throw new Error("HTTP "+r.status);
     badge(picks.length,meta);
+    flushPending();
   }).catch(function(e){
     sending=false;
     lastSig="";
     try{navigator.sendBeacon(O+"/api/espn/ingest",new Blob([body],{type:"application/json"}));}catch(e2){}
     badge(picks.length,meta,String(e.message||e));
+    flushPending();
   });
 }
 function ingestJson(json){
+  json=unwrap(json);
   if(!isLeaguePayload(json)) return;
   var meta=applyLeague(json,urlMeta());
   post(takePicks(json),meta);
 }
 function draftUrl(u){
-  return /mDraftDetail|segments\\/0\\/leagues\\/\\d+/.test(String(u||""));
+  u=String(u||"");
+  if(/\\/players\\?|view=players_wl/i.test(u)) return false;
+  return /mDraftDetail|draftDetail|mRoster|\\/leagues\\/-?\\d+|leagueHistory|\\/drafts\\/\\d+/i.test(u);
 }
 function hookNet(){
   if(window.__draftRoomEspnHooked) return;
@@ -1176,17 +1427,25 @@ function hookNet(){
 function pullApi(){
   var meta=urlMeta();
   if(!meta.leagueId){ badge(0,lastMeta||meta); return; }
-  var q="/seasons/"+(meta.season||2026)+"/segments/0/leagues/"+meta.leagueId+"?view=mDraftDetail&view=mSettings&view=mTeam";
-  var ctrl=typeof AbortController==="function"?new AbortController():null;
-  var t=setTimeout(function(){try{ctrl&&ctrl.abort();}catch(e){}},8000);
-  fetch(API+q,{credentials:"include",cache:"no-store",signal:ctrl?ctrl.signal:undefined}).then(function(r){
-    clearTimeout(t);
-    if(!r.ok) throw new Error("ESPN "+r.status);
-    return r.json();
-  }).then(ingestJson).catch(function(){
-    clearTimeout(t);
-    badge((lastSig&&Number(lastSig.split(":")[0]))||0,lastMeta||meta);
-  });
+  var views="view=mDraftDetail&view=mRoster&view=mSettings&view=mTeam";
+  var path="/apis/v3/games/ffl/seasons/"+(meta.season||2026)+"/segments/0/leagues/"+meta.leagueId+"?"+views;
+  var urls=[location.origin+path,"https://fantasy.espn.com"+path,API+"/seasons/"+(meta.season||2026)+"/segments/0/leagues/"+meta.leagueId+"?"+views];
+  var i=0;
+  function tryNext(){
+    if(i>=urls.length){ badge((lastSig&&Number(lastSig.split(":")[0]))||0,lastMeta||meta); return; }
+    var url=urls[i++];
+    var ctrl=typeof AbortController==="function"?new AbortController():null;
+    var t=setTimeout(function(){try{ctrl&&ctrl.abort();}catch(e){}},8000);
+    fetch(url,{credentials:"include",cache:"no-store",signal:ctrl?ctrl.signal:undefined}).then(function(r){
+      clearTimeout(t);
+      if(!r.ok) throw new Error("ESPN "+r.status);
+      return r.json();
+    }).then(function(json){ ingestJson(json); }).catch(function(){
+      clearTimeout(t);
+      tryNext();
+    });
+  }
+  tryNext();
 }
 function kick(){ idle(pullApi); }
 if(window.__draftRoomEspn&&window.__draftRoomEspn.kick){

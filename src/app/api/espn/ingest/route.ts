@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { espnPlayerIdOrZero, ingestCorsHeaders, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
+import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +46,8 @@ export async function POST(req: Request) {
     title?: string;
     ts?: number;
     text?: string;
+    json?: unknown;
+    payload?: unknown;
     meta?: EspnIngestMeta;
   } = {};
   const ct = req.headers.get("content-type") ?? "";
@@ -65,6 +67,9 @@ export async function POST(req: Request) {
     typeof body.title === "string" ? body.title : undefined,
   );
   let picks = normalizePicks(body.picks);
+  if (!picks.length) {
+    picks = extractEspnDraftPicks(body.json ?? body.payload);
+  }
   if (!picks.length && typeof body.text === "string" && body.text.trim()) {
     picks = parseEspnPickLog(body.text, meta.teams || 12);
   }

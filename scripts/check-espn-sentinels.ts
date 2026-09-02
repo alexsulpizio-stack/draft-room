@@ -1,4 +1,5 @@
 import {
+  extractEspnDraftPicks,
   extrasFromMapped,
   isPlaceholderEspnName,
   isValidEspnPlayerId,
@@ -93,6 +94,38 @@ assert(!/\bFA\b/.test(line), `subtitle hides unknown FA: ${line}`);
 
 const goodLine = playerSublineText(chase!);
 assert(/^ESPN \d+ [A-Z]{2,3} · bye \d+$/.test(goodLine), `real subtitle: ${goodLine}`);
+
+const nested = extractEspnDraftPicks({
+  draftDetail: {
+    picks: [{ overallPickNumber: 1, teamId: 5, player: { id: 4241457, fullName: "Ja'Marr Chase" } }],
+  },
+});
+assert(nested.length === 1 && nested[0].playerId === 4241457, `nested player.id, got ${JSON.stringify(nested)}`);
+assert(nested[0].playerName === "Ja'Marr Chase", "nested player name");
+
+const wrapped = extractEspnDraftPicks([
+  {
+    draftDetail: {
+      picks: [{ overallPickNumber: 2, playerId: 3116406, teamId: 1 }],
+    },
+    players: [{ id: 3116406, fullName: "Jahmyr Gibbs" }],
+  },
+]);
+assert(wrapped.length === 1 && wrapped[0].playerId === 3116406, "array-wrapped league payload");
+assert(wrapped[0].playerName === "Jahmyr Gibbs", "name filled from players list");
+
+const idOnly = mapEspnPicks({
+  picks: [{ overallPickNumber: 1, playerId: 4241457, teamId: 5 }],
+  pickOrder: [],
+  teamsCount: 12,
+  players: new Map([
+    [
+      4241457,
+      { id: 4241457, name: "Ja'Marr Chase", pos: "WR", team: "CIN", ourId: chase!.id, adp: 3 },
+    ],
+  ]),
+});
+assert(idOnly.length === 1 && idOnly[0].playerId === chase!.id, `ESPN id-only pick maps to snapshot, got ${JSON.stringify(idOnly)}`);
 
 const merged = mergeEspnPicks(
   [{ overallPickNumber: 1, playerId: -1, teamId: 0 }],
