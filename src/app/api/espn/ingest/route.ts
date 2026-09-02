@@ -84,7 +84,7 @@ export async function POST(req: Request) {
     picks,
     href: typeof body.href === "string" ? body.href : undefined,
     title: typeof body.title === "string" ? body.title : undefined,
-    ts: Number(body.ts) || Date.now(),
+    ts: Date.now(),
     meta,
   });
   return cors(req, { ok: true, count: picks.length, meta });

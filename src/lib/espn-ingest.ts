@@ -58,7 +58,7 @@ export function setIngest(payload: IngestPayload) {
 }
 
 export function getIngest(): IngestPayload | null {
-  if (last) return last;
-  last = readDisk();
+  const disk = readDisk();
+  if (disk && (!last || disk.ts >= last.ts)) last = disk;
   return last;
 }

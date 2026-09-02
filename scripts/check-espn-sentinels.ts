@@ -216,6 +216,20 @@ assert(
   "ingest written to disk",
 );
 
+const { writeFileSync } = require("node:fs") as typeof import("node:fs");
+writeFileSync(
+  INGEST_PATHS[0],
+  JSON.stringify({
+    picks: [{ overallPickNumber: 2, playerId: 4241457, teamId: 1, playerName: "Ja'Marr Chase" }],
+    ts: Date.now() + 10,
+  }),
+);
+const afterDisk = getIngest();
+assert(
+  afterDisk?.picks[0]?.playerName === "Ja'Marr Chase",
+  `getIngest rereads newer disk payload, got ${JSON.stringify(afterDisk?.picks)}`,
+);
+
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);
 console.log("sentinel subtitle:", line);
