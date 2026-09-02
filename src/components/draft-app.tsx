@@ -2,7 +2,9 @@
 
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
+  ChevronDown,
   ChevronLeft,
+  ChevronUp,
   ClipboardPaste,
   RotateCcw,
   Settings2,
@@ -39,6 +41,7 @@ import {
   nextUserPick,
   pickOwner,
   picksUntilUser,
+  POS_ORDER,
   recommendPicks,
   rosterFor,
   sourceGap,
@@ -52,6 +55,82 @@ import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
+
+type BoardSort = "blend" | "pos" | "fp" | "ds" | "adp" | "gap";
+
+function compareBoard(
+  a: Player,
+  b: Player,
+  key: BoardSort,
+  dir: "asc" | "desc",
+  dsWeight: number,
+) {
+  const sign = dir === "asc" ? 1 : -1;
+  const blend = blendedRank(a, dsWeight) - blendedRank(b, dsWeight);
+  let d = 0;
+  switch (key) {
+    case "pos":
+      d = POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos);
+      break;
+    case "fp":
+      d = a.fpRank - b.fpRank;
+      break;
+    case "ds":
+      d = a.dsRank - b.dsRank;
+      break;
+    case "adp":
+      d = a.adp - b.adp;
+      break;
+    case "gap":
+      d = sourceGap(a) - sourceGap(b);
+      break;
+    default:
+      d = blend;
+  }
+  if (d === 0) d = blend || a.name.localeCompare(b.name);
+  return d * sign;
+}
+
+function SortTh({
+  label,
+  column,
+  sortKey,
+  sortDir,
+  onSort,
+  className,
+}: {
+  label: string;
+  column: BoardSort;
+  sortKey: BoardSort;
+  sortDir: "asc" | "desc";
+  onSort: (key: BoardSort) => void;
+  className?: string;
+}) {
+  const active = sortKey === column;
+  return (
+    <th className={cn("px-2 py-2 font-medium", className)} aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={cn(
+          "inline-flex items-center gap-0.5 rounded-sm uppercase tracking-wide hover:text-foreground",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {label}
+        {active ? (
+          sortDir === "asc" ? (
+            <ChevronUp className="size-3" />
+          ) : (
+            <ChevronDown className="size-3" />
+          )
+        ) : (
+          <span className="inline-block size-3" />
+        )}
+      </button>
+    </th>
+  );
+}
 
 type Persisted = {
   settings: LeagueSettings;
@@ -147,8 +226,13 @@ export function DraftApp() {
     [data]
   );
   const applyEspnPicks = useCallback(
-    (nextPicks: DraftPick[], extraPlayers: Player[]) => {
-      writeStore({ ...data, picks: nextPicks, extras: extraPlayers });
+    (nextPicks: DraftPick[], extraPlayers: Player[], settingsPatch?: LeagueSettings) => {
+      writeStore({
+        ...data,
+        picks: nextPicks,
+        extras: extraPlayers,
+        settings: settingsPatch ?? data.settings,
+      });
     },
     [data]
   );
@@ -156,6 +240,8 @@ export function DraftApp() {
   const [query, setQuery] = useState("");
   const [posFilter, setPosFilter] = useState<Position | "ALL">("ALL");
   const [showTaken, setShowTaken] = useState(false);
+  const [sortKey, setSortKey] = useState<BoardSort>("blend");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -207,6 +293,15 @@ export function DraftApp() {
       .slice(0, 12);
   }, [available]);
 
+  const toggleSort = (key: BoardSort) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "gap" ? "desc" : "asc");
+  };
+
   const sortedBoard = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...board]
@@ -220,8 +315,8 @@ export function DraftApp() {
             p.pos.toLowerCase() === q
           : true
       )
-      .sort((a, b) => blendedRank(a, settings.dsWeight) - blendedRank(b, settings.dsWeight));
-  }, [board, posFilter, showTaken, taken, query, settings.dsWeight, settings.roster.dst]);
+      .sort((a, b) => compareBoard(a, b, sortKey, sortDir, settings.dsWeight));
+  }, [board, posFilter, showTaken, taken, query, settings.dsWeight, settings.roster.dst, sortKey, sortDir]);
 
   const draftPlayer = useCallback(
     (playerId: string, team = onClock) => {
@@ -301,7 +396,10 @@ export function DraftApp() {
                 {settings.leagueName || "Draft Room"}
               </p>
               <p className="text-[11px] text-muted-foreground">
-                JackAL · pick 5 · Half PPR · 3 WR · RB/WR · snake Thu 9/3 7:00 PM
+                {settings.teamNames[settings.slot - 1] ?? `Pick ${settings.slot}`} · pick{" "}
+                {settings.slot} · {settings.teams} teams ·{" "}
+                {settings.scoring === "half" ? "Half PPR" : settings.scoring === "ppr" ? "PPR" : "Std"} ·{" "}
+                {settings.draftType === "linear" ? "linear" : "snake"}
               </p>
             </div>
           </div>
@@ -410,7 +508,18 @@ export function DraftApp() {
           </div>
           <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] text-muted-foreground">
             <span>
-              Sorted by blended rank · FP {100 - settings.dsWeight}% / DS {settings.dsWeight}%
+              Sorted by{" "}
+              {sortKey === "blend"
+                ? `blended rank · FP ${100 - settings.dsWeight}% / DS ${settings.dsWeight}%`
+                : sortKey === "pos"
+                  ? `position ${sortDir === "asc" ? "QB → DST" : "DST → QB"}`
+                  : sortKey === "fp"
+                    ? `FantasyPros ${sortDir === "asc" ? "best first" : "worst first"}`
+                    : sortKey === "ds"
+                      ? `DraftSharks ${sortDir === "asc" ? "best first" : "worst first"}`
+                      : sortKey === "adp"
+                        ? `ADP ${sortDir === "asc" ? "earliest first" : "latest first"}`
+                        : `FP vs DS gap ${sortDir === "desc" ? "DS+ first" : "FP+ first"}`}
             </span>
             <label className="flex items-center gap-2">
               <Switch checked={showTaken} onCheckedChange={setShowTaken} />
@@ -421,13 +530,13 @@ export function DraftApp() {
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 z-10 bg-muted text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="px-2 py-2 font-medium">#</th>
+                  <SortTh label="#" column="blend" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-2 py-2 font-medium">Player</th>
-                  <th className="px-2 py-2 font-medium">Pos</th>
-                  <th className="px-2 py-2 font-medium">FP</th>
-                  <th className="px-2 py-2 font-medium">DS</th>
-                  <th className="px-2 py-2 font-medium">ADP</th>
-                  <th className="px-2 py-2 font-medium">Gap</th>
+                  <SortTh label="Pos" column="pos" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh label="FP" column="fp" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh label="DS" column="ds" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh label="ADP" column="adp" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh label="Gap" column="gap" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-2 py-2 font-medium"></th>
                 </tr>
               </thead>
@@ -811,34 +920,46 @@ function PlanCard({
       .sort((a, b) => a.adp - b.adp);
   }, [available]);
 
+  const youName = settings.teamNames[settings.slot - 1] ?? `Pick ${settings.slot}`;
+  const path = myPicks.slice(0, 4).map((o) => formatPick(o, settings.teams));
+  const isJfl = settings.espnLeagueId === "1361349772";
   const slot = settings.slot;
   const turn = slot === 5;
 
   return (
     <div className="space-y-3 rounded-xl border border-border p-3 text-sm">
       <p>
-        You are <span className="font-semibold text-primary">JackAL</span>, pick{" "}
-        <span className="font-semibold text-primary">5</span> in JFL 28. Snake path is{" "}
-        <span className="font-mono text-foreground">1.05 / 2.08 / 3.05 / 4.08</span>. The 2/3
-        turn is the draft.
+        You are <span className="font-semibold text-primary">{youName}</span>, pick{" "}
+        <span className="font-semibold text-primary">{settings.slot}</span>
+        {settings.leagueName ? ` in ${settings.leagueName}` : ""}. Snake path is{" "}
+        <span className="font-mono text-foreground">{path.join(" / ") || "—"}</span>.
       </p>
       <ul className="space-y-2 text-muted-foreground">
-        <li>
-          {turn
-            ? "1.05: take the last of Gibbs / Bijan / Chase / Nacua / JSN. In this 3-WR league, an elite WR at 5 is not a reach. Pass on CMC unless the top five are gone — WATCH flag, and you only start one dedicated RB."
-            : slot <= 3
-              ? "This is a 3-WR league. Chase / Nacua / JSN / ARSB go over a mid-RB at 1.01–1.03 unless Gibbs or Bijan is there."
-              : "Late slot: if Nacua, JSN, or ARSB slides, take the WR. You start three of them."}
-        </li>
-        <li>
-          2.08 comes back after eight picks. If you took WR at 5, smash the best remaining RB (Cook / Achane / Hampton / Walker). If you took RB at 5, take the best WR on the board — London, AJ Brown, Nico, ARSB.
-        </li>
-        <li>
-          RB/WR is not full FLEX — TE cannot go there. One workhorse RB is enough early; extra WRs can fill the combo. Never draft a D/ST. Kicker in round 14. Wait on QB unless Allen falls to 4.08.
-        </li>
-        <li>
-          First downs pay 0.25. Confirm before Thursday: Jeanty&apos;s leg, Nabers&apos; workload, Egbuka&apos;s toe, Love&apos;s ankle, Kraft practicing, Kamara (out).
-        </li>
+        {isJfl ? (
+          <>
+            <li>
+              {turn
+                ? "1.05: take the last of Gibbs / Bijan / Chase / Nacua / JSN. In this 3-WR league, an elite WR at 5 is not a reach. Pass on CMC unless the top five are gone — WATCH flag, and you only start one dedicated RB."
+                : slot <= 3
+                  ? "This is a 3-WR league. Chase / Nacua / JSN / ARSB go over a mid-RB at 1.01–1.03 unless Gibbs or Bijan is there."
+                  : "Late slot: if Nacua, JSN, or ARSB slides, take the WR. You start three of them."}
+            </li>
+            <li>
+              2.08 comes back after eight picks. If you took WR at 5, smash the best remaining RB (Cook / Achane / Hampton / Walker). If you took RB at 5, take the best WR on the board — London, AJ Brown, Nico, ARSB.
+            </li>
+            <li>
+              RB/WR is not full FLEX — TE cannot go there. One workhorse RB is enough early; extra WRs can fill the combo. Never draft a D/ST. Kicker in round 14. Wait on QB unless Allen falls to 4.08.
+            </li>
+            <li>
+              First downs pay 0.25. Confirm before Thursday: Jeanty&apos;s leg, Nabers&apos; workload, Egbuka&apos;s toe, Love&apos;s ankle, Kraft practicing, Kamara (out).
+            </li>
+          </>
+        ) : (
+          <li>
+            Recs follow the roster in League settings. Syncing an ESPN mock or another league
+            updates pick count and whose turn it is; set your slot if the URL did not include teamId.
+          </li>
+        )}
       </ul>
       <div>
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -890,8 +1011,9 @@ function SettingsSheet({
         <SheetHeader>
           <SheetTitle>{settings.leagueName}</SheetTitle>
           <SheetDescription>
-            Loaded from ESPN. You are <span className="text-foreground">JackAL, pick 5</span>.
-            Snake turns are 1.05 and 2.08. 90 seconds a pick, Thu Sep 3, 7:00 PM EDT.
+            {settings.espnLeagueId === "1361349772"
+              ? "JFL 28 defaults. You are JackAL, pick 5. Change slot, scoring, and roster for any other ESPN draft you sync."
+              : `Syncing ${settings.leagueName || "this ESPN draft"}. You are pick ${settings.slot} of ${settings.teams}.`}
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-4 px-4 pb-8">
@@ -911,7 +1033,7 @@ function SettingsSheet({
               {Array.from({ length: settings.teams }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
                   {n}. {settings.teamNames[n - 1] ?? `Pick ${n}`}
-                  {n === 5 ? " (you)" : ""}
+                  {n === settings.slot ? " (you)" : ""}
                 </option>
               ))}
             </select>
