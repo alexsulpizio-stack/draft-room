@@ -7,6 +7,16 @@ import { DEFAULT_SETTINGS } from "./types";
 export const ESPN_API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
 export const ESPN_FANTASY_ORIGIN = "https://fantasy.espn.com";
 
+export function espnLeagueHomeUrl(leagueId: string, season = 2026) {
+  const id = parseLeagueId(leagueId) || leagueId.trim();
+  return `${ESPN_FANTASY_ORIGIN}/football/league?leagueId=${id}&seasonId=${season}`;
+}
+
+export function espnDraftRoomUrl(leagueId: string, season = 2026) {
+  const id = parseLeagueId(leagueId) || leagueId.trim();
+  return `${ESPN_FANTASY_ORIGIN}/football/draft?leagueId=${id}&seasonId=${season}`;
+}
+
 /** ESPN proTeamId → NFL abbreviation. */
 export const PRO_TEAM: Record<number, string> = {
   0: "FA",

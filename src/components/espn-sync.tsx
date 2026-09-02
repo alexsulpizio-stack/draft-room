@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, Copy, Radio, Unplug } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
+import { Check, Copy, ExternalLink, Radio, Unplug } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,8 @@ import {
 import { pickOwner } from "@/lib/draft";
 import {
   buildBookmarklet,
-  ESPN_FANTASY_ORIGIN,
+  espnDraftRoomUrl,
+  espnLeagueHomeUrl,
   extrasFromMapped,
   matchByName,
   parseEspnPickLog,
@@ -88,6 +89,40 @@ function mappedToDraft(mapped: MappedEspnPick[]): DraftPick[] {
   }));
 }
 
+/** React 19 strips javascript: hrefs. Set the bookmarklet on the DOM so drag-to-bookmarks still works. */
+function BookmarkletAnchor({
+  bookmarklet,
+  className,
+  title,
+  onClick,
+  children,
+}: {
+  bookmarklet: string;
+  className?: string;
+  title?: string;
+  onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !bookmarklet.startsWith("javascript:")) return;
+    el.setAttribute("href", bookmarklet);
+  }, [bookmarklet]);
+  return (
+    <a
+      ref={ref}
+      href="#"
+      draggable
+      title={title}
+      onClick={onClick}
+      className={className}
+    >
+      {children}
+    </a>
+  );
+}
+
 export type EspnLiveStatus = {
   live: boolean;
   source: string;
@@ -117,7 +152,7 @@ export function EspnSync({
   const [info, setInfo] = useState<EspnLeagueInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"bookmark" | "league" | "draft" | null>(null);
   const [pasteLog, setPasteLog] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [ingestHint, setIngestHint] = useState<string | null>(null);
@@ -148,6 +183,8 @@ export function EspnSync({
     () => "",
   );
   const bookmarkHref = origin ? buildBookmarklet(origin, settings.teams) : "javascript:void(0)";
+  const leagueHomeUrl = espnLeagueHomeUrl(settings.espnLeagueId || "1361349772", season);
+  const draftRoomUrl = espnDraftRoomUrl(settings.espnLeagueId || "1361349772", season);
 
   const persistAuth = (next: Auth) => {
     localStorage.setItem(AUTH_KEY, JSON.stringify(next));
@@ -397,21 +434,20 @@ export function EspnSync({
     }
   };
 
-  const copyBookmarklet = async () => {
+  const copyText = async (value: string, which: "bookmark" | "league" | "draft") => {
     try {
-      await navigator.clipboard.writeText(bookmarkHref);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(value);
+      setCopied(which);
+      window.setTimeout(() => setCopied(null), 2000);
     } catch {
-      setError("Clipboard blocked. Drag the Sync ESPN chip to your bookmarks bar instead.");
+      setError("Clipboard blocked. Select the URL and copy it yourself.");
     }
   };
 
   return (
     <>
-      <a
-        href={bookmarkHref}
-        draggable
+      <BookmarkletAnchor
+        bookmarklet={bookmarkHref}
         title="Drag this onto the bookmarks bar, then click it on the ESPN draft tab. Click here for the two-step setup."
         onClick={(e) => {
           e.preventDefault();
@@ -426,6 +462,16 @@ export function EspnSync({
       >
         <Radio className={cn("size-3.5", status.live && "animate-live-pulse")} />
         {status.live ? `Sync ESPN · ${status.pickCount}` : "Sync ESPN"}
+      </BookmarkletAnchor>
+      <a
+        href={leagueHomeUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open JFL 28 on ESPN (league home)"
+        className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-card px-3 text-xs font-semibold text-foreground no-underline hover:bg-accent"
+      >
+        <ExternalLink className="size-3.5" />
+        JFL 28
       </a>
       <Sheet
         open={open}
@@ -475,44 +521,80 @@ export function EspnSync({
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                   Drag the green chip onto the bookmarks bar. Press Ctrl+Shift+B if the bar is hidden.
                 </p>
-                <a
-                  href={bookmarkHref}
-                  draggable
+                <BookmarkletAnchor
+                  bookmarklet={bookmarkHref}
                   onClick={(e) => e.preventDefault()}
                   className="mt-3 inline-flex cursor-grab items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground no-underline shadow-sm active:cursor-grabbing"
                 >
                   <Radio className="size-4" />
                   Sync ESPN
-                </a>
+                </BookmarkletAnchor>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   className="mt-2 h-7 px-2 text-[11px]"
-                  onClick={() => void copyBookmarklet()}
+                  onClick={() => void copyText(bookmarkHref, "bookmark")}
                 >
-                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copied ? "Copied" : "Copy instead"}
+                  {copied === "bookmark" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                  {copied === "bookmark" ? "Copied" : "Copy instead"}
                 </Button>
               </li>
               <li className="rounded-xl border border-border bg-card p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  2 · Click it on ESPN
+                  2 · Open ESPN, then click the bookmark
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Open{" "}
-                  <a
-                    className="font-medium text-primary underline-offset-2 hover:underline"
-                    href={`${ESPN_FANTASY_ORIGIN}/football/draft?leagueId=1361349772`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    your JFL 28 draft tab
-                  </a>
-                  , then click <span className="font-medium text-foreground">Sync ESPN</span>. A
-                  green badge appears on that page. Leave the tab open — Draft Room pulls picks every
-                  few seconds after the first send.
+                  ESPN only opens the live draft room about an hour before 7:00 PM Thursday. Until then
+                  use league home. Tomorrow, use the draft room link, then click{" "}
+                  <span className="font-medium text-foreground">Sync ESPN</span> in the bookmarks bar.
                 </p>
+                <div className="mt-3 grid gap-2">
+                  <a
+                    href={leagueHomeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground no-underline"
+                  >
+                    <ExternalLink className="size-4" />
+                    Open JFL 28 on ESPN
+                  </a>
+                  <p className="break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
+                    {leagueHomeUrl}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit"
+                    onClick={() => void copyText(leagueHomeUrl, "league")}
+                  >
+                    {copied === "league" ? <Check /> : <Copy />}
+                    {copied === "league" ? "Copied" : "Copy league URL"}
+                  </Button>
+                  <a
+                    href={draftRoomUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-semibold text-foreground no-underline hover:bg-accent"
+                  >
+                    <ExternalLink className="size-4" />
+                    Open draft room
+                  </a>
+                  <p className="break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
+                    {draftRoomUrl}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit"
+                    onClick={() => void copyText(draftRoomUrl, "draft")}
+                  >
+                    {copied === "draft" ? <Check /> : <Copy />}
+                    {copied === "draft" ? "Copied" : "Copy draft URL"}
+                  </Button>
+                </div>
                 {ingestHint ? (
                   <p className="mt-2 text-xs font-medium text-primary">{ingestHint}</p>
                 ) : (

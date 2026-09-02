@@ -28,7 +28,12 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:43173](http://localhost:43173) in Chrome on a computer. Keep the ESPN draft in another tab.
+Open [http://localhost:43173](http://localhost:43173) in Chrome on a computer. Keep ESPN in another tab.
+
+JFL 28 on ESPN:
+
+- League home: [https://fantasy.espn.com/football/league?leagueId=1361349772&seasonId=2026](https://fantasy.espn.com/football/league?leagueId=1361349772&seasonId=2026)
+- Draft room (from ~6:00 PM EDT Thursday): [https://fantasy.espn.com/football/draft?leagueId=1361349772&seasonId=2026](https://fantasy.espn.com/football/draft?leagueId=1361349772&seasonId=2026)
 
 ## ESPN live sync
 
