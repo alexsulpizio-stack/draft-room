@@ -1,5 +1,5 @@
-import { matchByName, matchOurPlayer } from "./espn";
-import type { Injury, Player, Position, Scoring } from "./types";
+import { matchByName } from "./espn";
+import type { Injury, Player, Scoring } from "./types";
 
 export type RankPatch = { fpRank?: number; dsRank?: number; adp?: number };
 
@@ -59,23 +59,15 @@ async function fetchText(url: string, extra?: HeadersInit) {
   return res.text();
 }
 
-function posOf(raw: string): Position {
-  const p = raw.toUpperCase();
-  if (p === "QB" || p === "RB" || p === "WR" || p === "TE" || p === "K") return p;
-  return "DST";
-}
-
-function isSkillPos(raw?: string): boolean {
-  if (!raw) return false;
-  const p = raw.toUpperCase().replace(/[^A-Z]/g, "");
-  return p === "QB" || p === "RB" || p === "WR" || p === "TE" || p === "K" || p === "DST" || p === "DEF" || p === "D";
-}
-
-function idFor(name: string, pos?: string, team?: string): string | null {
-  if (pos && isSkillPos(pos) && team && team !== "FA") {
-    const matched = matchOurPlayer(name, posOf(pos), team);
-    if (matched) return matched;
-  }
+/**
+ * Map a ranking-source name onto our board.
+ *
+ * Full-name match only. `matchOurPlayer`'s last-name+pos fallback is for ESPN
+ * abbreviations like "J. Taylor" / IND; on a 700-player ECR list it maps
+ * J'Mari Taylor (JAC RB, rank_ecr 382) onto Jonathan Taylor and overwrites
+ * a top-10 fpRank with 382.
+ */
+function idFor(name: string): string | null {
   return matchByName(name)?.id ?? null;
 }
 
@@ -217,8 +209,32 @@ function ecrInjuryFields(p: Record<string, unknown>): string {
     .join(" ");
 }
 
+/**
+ * Consensus overall rank from a FantasyPros `ecrData.players[]` row.
+ *
+ * Live half-PPR cheatsheet fields (2026):
+ *   rank_ecr          — overall ECR, 1 = best. THIS is fpRank.
+ *   rank              — sometimes present as an alias of rank_ecr
+ *   rank_ave          — mean of expert ranks (decimal string, e.g. "8.46"). NOT ECR, NOT ADP.
+ *   rank_min/rank_max — expert range
+ *   player_id         — FP id (JT 19217, Gibbs 22968). Never a rank.
+ *   player_owned_avg  — roster %
+ *   pos_rank          — e.g. "RB3"
+ *   player_ecr_delta  — week-over-week change, often null. NOT a rank.
+ * Cheatsheet rows have no pts / r2p_pts / adp.
+ */
+export function ecrOverallRank(p: Record<string, unknown>): number {
+  const n = Number(p.rank_ecr ?? p.rank);
+  return Number.isFinite(n) && n > 0 ? n : NaN;
+}
+
+function takeBetterRank(prev: number | undefined, next: number): number {
+  if (typeof prev !== "number" || !Number.isFinite(prev) || prev <= 0) return next;
+  return next < prev ? next : prev;
+}
+
 export function parseFantasyProsEcr(html: string): {
-  players: Array<{ name: string; rank: number; team: string; pos: string; injury?: Injury; adp?: number }>;
+  players: Array<{ name: string; rank: number; team: string; pos: string; injury?: Injury }>;
   updated?: string;
 } {
   const m = html.match(/var ecrData\s*=\s*(\{[\s\S]*?\});/);
@@ -230,19 +246,11 @@ export function parseFantasyProsEcr(html: string): {
   const players = (data.players ?? [])
     .map((p) => {
       const name = String(p.player_name ?? "");
-      const rank = Number(p.rank_ecr);
+      const rank = ecrOverallRank(p);
       const team = String(p.player_team_id ?? "FA");
       const pos = String(p.player_position_id ?? "");
       const injury = classifyInjury(ecrInjuryFields(p));
-      const adp = Number(p.rank_ave ?? p.rank_adp ?? p.adp ?? p.player_adp);
-      return {
-        name,
-        rank,
-        team,
-        pos,
-        ...(injury ? { injury } : {}),
-        ...(Number.isFinite(adp) && adp > 0 ? { adp } : {}),
-      };
+      return { name, rank, team, pos, ...(injury ? { injury } : {}) };
     })
     .filter((p) => p.name && Number.isFinite(p.rank) && p.rank > 0);
   return { players, updated: data.last_updated };
@@ -442,20 +450,13 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
     fpUpdated = fpRes.value.updated;
     fpTotal = fpRes.value.players.length;
     for (const p of fpRes.value.players) {
-      const id = idFor(p.name, p.pos, p.team);
-      if (!id) continue;
+      const id = idFor(p.name);
+      if (!id || p.rank <= 0) continue;
       const cur = patches.get(id) ?? {};
-      let changed = false;
-      if (p.rank > 0) {
-        cur.fpRank = p.rank;
-        fpMatched += 1;
-        changed = true;
-      }
-      if (p.adp && p.adp > 0) {
-        cur.adp = p.adp;
-        changed = true;
-      }
-      if (changed) patches.set(id, cur);
+      const next = takeBetterRank(cur.fpRank, p.rank);
+      if (cur.fpRank == null) fpMatched += 1;
+      cur.fpRank = next;
+      patches.set(id, cur);
     }
     injuryTotal += absorbHits(
       injuries,
@@ -478,14 +479,13 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
   if (dsRes.status === "fulfilled") {
     dsTotal = dsRes.value.ranks.length;
     for (const p of dsRes.value.ranks) {
-      const id = idFor(p.name, p.pos);
-      if (!id) continue;
+      const id = idFor(p.name);
+      if (!id || p.rank <= 0) continue;
       const cur = patches.get(id) ?? {};
-      if (p.rank > 0) {
-        cur.dsRank = p.rank;
-        patches.set(id, cur);
-        dsMatched += 1;
-      }
+      const next = takeBetterRank(cur.dsRank, p.rank);
+      if (cur.dsRank == null) dsMatched += 1;
+      cur.dsRank = next;
+      patches.set(id, cur);
     }
     injuryTotal += absorbHits(injuries, dsRes.value.injuries, espnSeen, {});
   } else {

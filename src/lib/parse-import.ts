@@ -11,6 +11,17 @@ function looksLikeHeader(line: string) {
   return l.includes("player") || l.includes("rank") || l.includes("name");
 }
 
+/** Prefer RK / rank_ecr / ECR. Never rank_ave, rank_min, FPTS, player_id, owned. */
+function ecrRankColumnIndex(cols: string[]): number {
+  const exact = cols.findIndex((c) => /^(rk|rank|ecr|overall|rank_ecr)$/.test(c));
+  if (exact >= 0) return exact;
+  return cols.findIndex((c) => {
+    if (/rank[_\s-]?(ave|avg|average|min|max|std|adp)/.test(c)) return false;
+    if (/\b(fpts|points|proj|owned|player_id|player id)\b/.test(c)) return false;
+    return /^(rk|ecr)\b/.test(c) || c.includes("rank_ecr") || c === "rank";
+  });
+}
+
 /**
  * Accepts FantasyPros-style CSV/TSV or a simple Rank,Player,Team,Pos paste.
  * Overlays fpRank (and ADP when present) onto the built-in board.
@@ -34,8 +45,8 @@ export function parseRankingPaste(text: string): {
 
   const idx = (names: string[]) => cols.findIndex((c) => names.some((n) => c.includes(n)));
   const playerIdx = header ? Math.max(0, idx(["player", "name"])) : -1;
-  const rankIdx = header ? idx(["rk", "rank", "ecr", "overall"]) : -1;
-  const adpIdx = header ? idx(["adp"]) : -1;
+  const rankIdx = header ? ecrRankColumnIndex(cols) : -1;
+  const adpIdx = header ? cols.findIndex((c) => /^(adp)$/.test(c) || (c.includes("adp") && !c.includes("ecr"))) : -1;
 
   rows.forEach((line, i) => {
     const parts = line.split(/[,\t]/).map(clean);
@@ -69,7 +80,9 @@ export function parseRankingPaste(text: string): {
       return;
     }
     const next = updates.get(hit.id) ?? {};
-    if (rank && Number.isFinite(rank) && rank > 0) next.fpRank = rank;
+    if (rank && Number.isFinite(rank) && rank > 0) {
+      if (next.fpRank == null || rank < next.fpRank) next.fpRank = rank;
+    }
     if (adp != null && Number.isFinite(adp) && adp > 0) next.adp = adp;
     updates.set(hit.id, next);
   });
@@ -82,12 +95,7 @@ function matchPlayer(name: string): Player | undefined {
   const direct = PLAYERS.find((p) => p.id === s);
   if (direct) return direct;
   const lower = name.toLowerCase();
-  return PLAYERS.find(
-    (p) =>
-      p.name.toLowerCase() === lower ||
-      p.name.toLowerCase().includes(lower) ||
-      lower.includes(p.name.toLowerCase())
-  );
+  return PLAYERS.find((p) => p.name.toLowerCase() === lower);
 }
 
 export function applyUpdates(
