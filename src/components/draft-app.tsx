@@ -6,6 +6,8 @@ import {
   ChevronLeft,
   ChevronUp,
   ClipboardPaste,
+  Loader2,
+  RefreshCw,
   RotateCcw,
   Settings2,
   Star,
@@ -49,6 +51,7 @@ import {
   userPickOveralls,
 } from "@/lib/draft";
 import { applyUpdates, parseRankingPaste } from "@/lib/parse-import";
+import { applyRankPatches, scoringLabel, type RankPatch } from "@/lib/rank-refresh";
 import type { DraftPick, DraftType, LeagueSettings, Player, Position } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
@@ -132,6 +135,15 @@ function SortTh({
   );
 }
 
+type RankOverlay = {
+  patches: Record<string, RankPatch>;
+  fetchedAt: number;
+  scoring: string;
+  fpMatched: number;
+  dsMatched: number;
+  fpUpdated?: string;
+};
+
 type Persisted = {
   settings: LeagueSettings;
   picks: DraftPick[];
@@ -139,6 +151,7 @@ type Persisted = {
   avoids: string[];
   extras?: Player[];
   importText?: string;
+  rankOverlay?: RankOverlay;
 };
 
 const EMPTY: Persisted = {
@@ -206,6 +219,7 @@ export function DraftApp() {
   const picks = data.picks ?? EMPTY.picks;
   const stars = data.stars ?? EMPTY.stars;
   const extras = useMemo(() => data.extras ?? [], [data.extras]);
+  const rankOverlay = data.rankOverlay;
 
   const setSettings = useCallback(
     (next: LeagueSettings) => writeStore({ ...data, settings: next }),
@@ -247,14 +261,16 @@ export function DraftApp() {
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Player[] | null>(null);
   const [espn, setEspn] = useState<EspnLiveStatus>({ live: false, source: "empty", pickCount: 0 });
+  const [refreshing, setRefreshing] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const board = useMemo(() => {
-    const base = overrides ?? PLAYERS;
+    const ranked = applyRankPatches(PLAYERS, rankOverlay?.patches);
+    const base = overrides ?? ranked;
     if (!extras.length) return base;
     const ids = new Set(base.map((p) => p.id));
     return [...base, ...extras.filter((e) => !ids.has(e.id))];
-  }, [overrides, extras]);
+  }, [overrides, extras, rankOverlay]);
   const byId = useMemo(() => new Map(board.map((p) => [p.id, p])), [board]);
   const overall = picks.length + 1;
   const totalPicks = settings.teams * settings.rounds;
@@ -366,13 +382,57 @@ export function DraftApp() {
 
   const applyImport = () => {
     const parsed = parseRankingPaste(importText);
-    setOverrides(applyUpdates(PLAYERS, parsed.updates));
+    setOverrides(applyUpdates(applyRankPatches(PLAYERS, rankOverlay?.patches), parsed.updates));
     setImportMsg(
       `Updated ${parsed.matched} players from your paste${
         parsed.unmatched.length ? `. Unmatched: ${parsed.unmatched.slice(0, 6).join(", ")}` : "."
       }`
     );
     setImportOpen(false);
+  };
+
+  const refreshRankings = async () => {
+    setRefreshing(true);
+    setImportMsg(null);
+    try {
+      const res = await fetch(`/api/rankings/refresh?scoring=${settings.scoring}`, { cache: "no-store" });
+      const json = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+        warnings?: string[];
+        patches?: Record<string, RankPatch>;
+        fetchedAt?: number;
+        scoring?: string;
+        fpMatched?: number;
+        dsMatched?: number;
+        fpUpdated?: string;
+      };
+      if (!json.ok || !json.patches) {
+        setImportMsg(json.error ?? "Could not refresh FantasyPros / DraftSharks ranks.");
+        return;
+      }
+      setOverrides(null);
+      writeStore({
+        ...data,
+        rankOverlay: {
+          patches: json.patches,
+          fetchedAt: json.fetchedAt ?? Date.now(),
+          scoring: json.scoring ?? settings.scoring,
+          fpMatched: json.fpMatched ?? 0,
+          dsMatched: json.dsMatched ?? 0,
+          fpUpdated: json.fpUpdated,
+        },
+      });
+      const when = json.fpUpdated ? ` · FP ${json.fpUpdated}` : "";
+      const warn = json.warnings?.length ? ` · ${json.warnings[0]}` : "";
+      setImportMsg(
+        `Refreshed ${scoringLabel(settings.scoring)} ranks · FP ${json.fpMatched} · DS ${json.dsMatched}${when}${warn}`,
+      );
+    } catch {
+      setImportMsg("Network error refreshing ranks. The snapshot board is unchanged.");
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const myPicks = userPickOveralls(
@@ -443,6 +503,16 @@ export function DraftApp() {
               status={espn}
               setStatus={setEspn}
             />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refreshRankings()}
+              disabled={refreshing}
+              title="Pull live FantasyPros ECR and DraftSharks 3D ranks for the scoring in League settings"
+            >
+              {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              {refreshing ? "Refreshing…" : "Refresh ranks"}
+            </Button>
             <ImportDialog
               open={importOpen}
               onOpenChange={setImportOpen}
@@ -453,7 +523,9 @@ export function DraftApp() {
             <SettingsSheet settings={settings} setSettings={setSettings} />
           </div>
         </div>
-        {espn.live ? (
+        {importMsg ? (
+          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
+        ) : espn.live ? (
           <p className="border-t border-primary/20 bg-primary/8 px-4 py-1.5 text-center text-xs">
             <span className="font-medium text-primary">ESPN live</span>
             <span className="text-muted-foreground">
@@ -468,8 +540,6 @@ export function DraftApp() {
               {espn.warning ? ` · ${espn.warning}` : ""}
             </span>
           </p>
-        ) : importMsg ? (
-          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
         ) : null}
       </header>
 
@@ -520,6 +590,9 @@ export function DraftApp() {
                       : sortKey === "adp"
                         ? `ADP ${sortDir === "asc" ? "earliest first" : "latest first"}`
                         : `FP vs DS gap ${sortDir === "desc" ? "DS+ first" : "FP+ first"}`}
+              {rankOverlay
+                ? ` · live ${scoringLabel(settings.scoring)} ${new Date(rankOverlay.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                : " · Sept 1 snapshot"}
             </span>
             <label className="flex items-center gap-2">
               <Switch checked={showTaken} onCheckedChange={setShowTaken} />
