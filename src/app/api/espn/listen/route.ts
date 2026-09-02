@@ -8,6 +8,7 @@ import {
   requestPublicOrigin,
 } from "@/lib/espn";
 import { getIngest } from "@/lib/espn-ingest";
+import { getRelayTopic, pullRelayIntoIngest, relayUrl } from "@/lib/espn-relay";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,9 +18,12 @@ const STALE_MS = 12 * 60 * 1000;
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const fallbackTeams = Number(url.searchParams.get("teams")) || 12;
+  await pullRelayIntoIngest();
   const last = getIngest();
   const publicOrigin = requestPublicOrigin(req);
   const ingestUrl = publicOrigin ? `${publicOrigin}/api/espn/ingest` : "";
+  const topic = getRelayTopic();
+  const ntfy = relayUrl(topic);
   if (!last) {
     return NextResponse.json({
       ok: true,
@@ -31,6 +35,8 @@ export async function GET(req: Request) {
       count: 0,
       publicOrigin,
       ingestUrl,
+      relayTopic: topic,
+      relayUrl: ntfy,
     });
   }
   if (Date.now() - last.ts > STALE_MS) {
@@ -45,6 +51,8 @@ export async function GET(req: Request) {
       ts: last.ts,
       publicOrigin,
       ingestUrl,
+      relayTopic: topic,
+      relayUrl: ntfy,
     });
   }
   if (!last.picks.length) {
@@ -63,6 +71,8 @@ export async function GET(req: Request) {
       reason: last.meta?.reason,
       publicOrigin,
       ingestUrl,
+      relayTopic: topic,
+      relayUrl: ntfy,
     });
   }
 
@@ -92,5 +102,7 @@ export async function GET(req: Request) {
     meta: { ...meta, teams: teamsCount },
     publicOrigin,
     ingestUrl,
+    relayTopic: topic,
+    relayUrl: ntfy,
   });
 }

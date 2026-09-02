@@ -1008,7 +1008,7 @@ export function mapEspnPicks(args: {
         bye: snapshot?.bye ?? (meta?.team ? BYE_BY_TEAM[meta.team] ?? 0 : 0),
         adp: meta?.adp ?? snapshot?.adp,
       });
-      let ourId = meta?.ourId ?? (name ? matchOurPlayer(name, pos, live.team) : null) ?? snapshot?.id ?? null;
+      let ourId = snapshot?.id ?? meta?.ourId ?? (name ? matchOurPlayer(name, pos, live.team) : null);
       if (!ourId) ourId = unmatchedEspnId(name, p.overallPickNumber, espnId);
       if (ourId.startsWith("espn-") && name) {
         const named = matchByName(name);
@@ -1272,10 +1272,11 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
 }
 
 /** Bookmarklet that runs on fantasy.espn.com. Must stay cheap: no fiber walks, no body.innerText. */
-export function buildBookmarklet(origin: string): string {
+export function buildBookmarklet(origin: string, relayUrl = ""): string {
   const code = `(function(){
 var O=${JSON.stringify(origin.replace(/\/$/, ""))};
-var POLL=6000;
+var RELAY=${JSON.stringify(relayUrl)};
+var POLL=5000;
 var API="https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
 function takeSize(n){n=Number(n);return (n>=2&&n<=20)?n:0;}
 function urlMeta(){
@@ -1375,7 +1376,23 @@ function pname(p,names){
 function takePicks(json){
   json=unwrap(json); if(!json) return [];
   var names=nameMap(json);
-  var raw=(json.draftDetail&&json.draftDetail.picks)||json.picks||(json.draft&&json.draft.picks)||[];
+  var raw=(json.draftDetail&&json.draftDetail.picks)||json.picks||(json.draft&&json.draft.picks)||(json.draftBoard&&json.draftBoard.picks)||[];
+  if(!Array.isArray(raw)||!raw.length){
+    var bag=[],seen={};
+    function walk(node,depth){
+      if(!node||depth>5||bag.length>250) return;
+      if(Array.isArray(node)){ for(var i=0;i<node.length;i++) walk(node[i],depth+1); return; }
+      if(typeof node!=="object") return;
+      if(node.overallPickNumber&&(node.playerId||node.player||node.athleteId)){
+        var k=String(node.overallPickNumber)+":"+(node.playerId||"");
+        if(!seen[k]){ seen[k]=1; bag.push(node); }
+      }
+      var ks=["draftDetail","draft","picks","draftPicks","draftBoard","selection"];
+      for(var j=0;j<ks.length;j++) if(node[ks[j]]) walk(node[ks[j]],depth+1);
+    }
+    walk(json,0);
+    if(bag.length) raw=bag;
+  }
   var out=[],i,p,overall,playerId,name,team;
   if(Array.isArray(raw)){
     for(i=0;i<raw.length;i++){
@@ -1430,11 +1447,12 @@ function badge(n,meta,err){
     b.textContent="Draft Room · "+n+" picks captured, ingest failed: "+why+". Posts to "+O+"/api/espn/ingest";
     return;
   }
+  var clock=new Date().toLocaleTimeString();
   if(fail){
-    b.textContent="Draft Room · 0 picks — "+(why||emptyWhy(meta))+". Posts to "+O+"/api/espn/ingest";
+    b.textContent="Draft Room · 0 picks — "+(why||emptyWhy(meta))+" · "+clock+(RELAY?" · relay on":"");
     return;
   }
-  b.textContent="Draft Room is syncing "+n+" picks from "+label+". Posts to "+O+"/api/espn/ingest";
+  b.textContent="Draft Room is syncing "+n+" picks from "+label+" · "+clock;
 }
 function idle(fn){
   if(typeof requestIdleCallback==="function") requestIdleCallback(function(){fn();},{timeout:1500});
@@ -1445,6 +1463,23 @@ function flushPending(){
   if(!pending) return;
   var n=pending; pending=null;
   post(n.picks,n.meta);
+}
+function pack(picks,meta){
+  var rows=[],i,p;
+  for(i=0;i<picks.length;i++){
+    p=picks[i];
+    rows.push([p.overallPickNumber,p.playerId||0,p.teamId||0,p.playerName||""]);
+  }
+  var packed=JSON.stringify({v:1,p:rows,m:meta||{},h:location.href,t:Date.now()});
+  if(packed.length>3500){
+    rows=rows.map(function(r){return [r[0],r[1],r[2]];});
+    packed=JSON.stringify({v:1,p:rows,m:meta||{},h:location.href,t:Date.now()});
+  }
+  return packed;
+}
+function postRelay(picks,meta){
+  if(!RELAY||!picks||!picks.length) return;
+  try{fetch(RELAY,{method:"POST",headers:{"Content-Type":"text/plain"},body:pack(picks,meta),mode:"cors",keepalive:true}).catch(function(){});}catch(e){}
 }
 function post(picks,meta,err){
   lastMeta=meta;
@@ -1462,6 +1497,7 @@ function post(picks,meta,err){
   }
   var sig=picks.length+":"+picks[picks.length-1].overallPickNumber+":"+picks[picks.length-1].playerId+":"+(meta.teams||"")+":"+(meta.leagueId||"");
   if(sig===lastSig){ badge(picks.length,meta); return; }
+  postRelay(picks,meta);
   if(sending){ pending={picks:picks,meta:meta}; return; }
   sending=true;
   lastSig=sig;
@@ -1473,9 +1509,7 @@ function post(picks,meta,err){
     flushPending();
   }).catch(function(e){
     sending=false;
-    lastSig="";
-    try{navigator.sendBeacon(O+"/api/espn/ingest",new Blob([body],{type:"application/json"}));}catch(e2){}
-    badge(picks.length,meta,String(e.message||e));
+    badge(picks.length,meta);
     flushPending();
   });
 }

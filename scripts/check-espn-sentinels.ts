@@ -230,6 +230,12 @@ assert(
   `getIngest rereads newer disk payload, got ${JSON.stringify(afterDisk?.picks)}`,
 );
 
+const { unpackRelayMessage } = require("../src/lib/espn-relay") as typeof import("../src/lib/espn-relay");
+const packed = unpackRelayMessage(
+  JSON.stringify({ v: 1, p: [[1, 4241457, 5, "Ja'Marr Chase"]], t: Date.now() }),
+);
+assert(packed?.picks[0]?.playerId === 4241457 && packed.picks[0].playerName === "Ja'Marr Chase", "unpack relay");
+
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);
 console.log("sentinel subtitle:", line);

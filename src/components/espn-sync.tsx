@@ -163,6 +163,7 @@ export function EspnSync({
   const [advanced, setAdvanced] = useState(false);
   const [ingestHint, setIngestHint] = useState<string | null>(null);
   const [publicOrigin, setPublicOrigin] = useState("");
+  const [relayUrl, setRelayUrl] = useState("");
 
   const connRaw = useSyncExternalStore(subscribeConn, getConnSnap, () => "");
   const conn = useMemo(() => {
@@ -190,7 +191,8 @@ export function EspnSync({
     () => "",
   );
   const origin = bookmarkletOrigin(pageOrigin, publicOrigin);
-  const bookmarkHref = origin ? buildBookmarklet(origin) : "javascript:void(0)";
+  const bookmarkHref =
+    origin && relayUrl ? buildBookmarklet(origin, relayUrl) : "javascript:void(0)";
   const ingestUrl = origin ? `${origin}/api/espn/ingest` : "";
   const ingestIsLocal = origin ? isLoopbackOrigin(origin) : false;
   const draftRoomUrl = settings.espnLeagueId
@@ -360,9 +362,13 @@ export function EspnSync({
         reason?: string;
         publicOrigin?: string;
         ingestUrl?: string;
+        relayUrl?: string;
       };
       if (typeof json.publicOrigin === "string" && json.publicOrigin) {
         setPublicOrigin(json.publicOrigin);
+      }
+      if (typeof json.relayUrl === "string" && json.relayUrl) {
+        setRelayUrl(json.relayUrl);
       }
       if (!json.ingest || !json.picks?.length) {
         const why = json.reason || json.meta?.reason;
@@ -423,10 +429,13 @@ export function EspnSync({
 
   useEffect(() => {
     void fetch("/api/espn/ingest", { cache: "no-store" })
-      .then((r) => r.json() as Promise<{ publicOrigin?: string }>)
+      .then((r) => r.json() as Promise<{ publicOrigin?: string; relayUrl?: string }>)
       .then((json) => {
         if (typeof json.publicOrigin === "string" && json.publicOrigin) {
           setPublicOrigin(json.publicOrigin);
+        }
+        if (typeof json.relayUrl === "string" && json.relayUrl) {
+          setRelayUrl(json.relayUrl);
         }
       })
       .catch(() => {
@@ -537,10 +546,9 @@ export function EspnSync({
           <SheetHeader>
             <SheetTitle>Sync any ESPN draft</SheetTitle>
             <SheetDescription>
-              Drag the chip to your bookmarks bar, then click it on whatever ESPN draft tab is live
-              — JFL 28, another league, or a mock. Re-drag Sync ESPN after this update so the
-              bookmark posts to this Draft Room and explains empty captures. Leave that ESPN tab
-              open.
+              Delete the old bookmark, drag Sync ESPN again, then click it on the ESPN draft tab.
+              The green chip’s clock should tick. This build also relays picks through a public
+              channel so ESPN on your PC can reach Draft Room even when localhost cannot.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">
@@ -592,10 +600,15 @@ export function EspnSync({
                     Ingest URL: {ingestUrl}
                   </p>
                 ) : null}
+                {relayUrl ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Live picks also go through a public relay so ESPN on your PC can reach this board.
+                  </p>
+                ) : null}
                 {ingestIsLocal ? (
                   <p className="mt-1 text-xs text-destructive">
-                    This URL is localhost. Drag Sync ESPN from the same Draft Room preview tab you
-                    keep open — ESPN on your PC cannot reach a Cloud VM at 127.0.0.1.
+                    Direct ingest is localhost. Re-drag this chip so the bookmark includes the relay
+                    — otherwise ESPN on your PC cannot reach Draft Room.
                   </p>
                 ) : null}
                 <Button

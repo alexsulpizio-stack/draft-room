@@ -40,7 +40,7 @@ JFL 28 on ESPN:
 Works with **any** live ESPN draft — JFL 28, another league, or a mock. Two steps. No cookies.
 
 1. Drag the green **Sync ESPN** chip onto the Chrome bookmarks bar (Ctrl+Shift+B if the bar is hidden). After a Draft Room update, delete the old bookmark and drag it again — stale bookmarks miss live picks.
-2. Open whatever ESPN draft tab is live (mock lobby, live lobby, or a league room) and click that bookmark. Leave the tab open. ESPN's board should stay usable; a green "Draft Room is syncing N picks" chip appears on that tab.
+2. Open whatever ESPN draft tab is live (mock lobby, live lobby, or a league room) and click that bookmark. Leave the tab open. The green chip’s clock should tick; pick count rises as ESPN fills slots. Picks also go through a public relay so ESPN on your PC can reach a Cloud preview that is not on localhost.
 
 Draft Room reads league ID, season, team count, league name, draft type, and your slot (`teamId`) from that page, then fills the board as picks come in. Click the chip in Draft Room anytime for this reminder.
 
