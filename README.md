@@ -53,4 +53,4 @@ Cookies and a pasted pick log still exist under **Show cookies & paste** if a br
 - Never draft a D/ST. Kicker in the last round.
 - 1QB: wait unless elite value falls.
 
-Ranks start as a September 1, 2026 snapshot of public FantasyPros ECR and DraftSharks 3D values. Click **Refresh ranks** to pull live Half PPR (or whatever scoring is set in League) sheets on demand. Overlay a CSV via **Import** if you want your own FP list.
+Ranks start as a September 1, 2026 snapshot of public FantasyPros ECR and DraftSharks 3D values. Click **Refresh ranks** to pull live Half PPR (or whatever scoring is set in League) sheets **and recent injury flags** (Out / Q / Watch) from FantasyPros injury news, DraftSharks ranking badges when present, and the public ESPN injury report (no cookies). Overlay a CSV via **Import** if you want your own FP list.

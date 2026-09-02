@@ -150,6 +150,7 @@ type RankOverlay = {
   injuries?: Record<string, Injury>;
   injuryMatched?: number;
   injuriesLive?: boolean;
+  injuriesComplete?: boolean;
 };
 
 type Persisted = {
@@ -277,6 +278,7 @@ export function DraftApp() {
       applyRankPatches(PLAYERS, rankOverlay?.patches),
       rankOverlay?.injuries,
       rankOverlay?.injuriesLive,
+      rankOverlay?.injuriesComplete,
     );
     const base = overrides ?? ranked;
     if (!extras.length) return base;
@@ -400,6 +402,7 @@ export function DraftApp() {
           applyRankPatches(PLAYERS, rankOverlay?.patches),
           rankOverlay?.injuries,
           rankOverlay?.injuriesLive,
+          rankOverlay?.injuriesComplete,
         ),
         parsed.updates,
       ),
@@ -425,6 +428,7 @@ export function DraftApp() {
         injuries?: Record<string, Injury>;
         injuryMatched?: number;
         injuriesLive?: boolean;
+        injuriesComplete?: boolean;
         fetchedAt?: number;
         scoring?: string;
         fpMatched?: number;
@@ -440,6 +444,7 @@ export function DraftApp() {
           ? json.patches
           : data.rankOverlay?.patches;
       const injuriesLive = Boolean(json.injuriesLive && json.injuries);
+      const injuriesComplete = Boolean(injuriesLive && json.injuriesComplete);
       setOverrides(null);
       writeStore({
         ...data,
@@ -455,6 +460,9 @@ export function DraftApp() {
             ? json.injuryMatched
             : data.rankOverlay?.injuryMatched,
           injuriesLive: injuriesLive || data.rankOverlay?.injuriesLive,
+          injuriesComplete: injuriesLive
+            ? injuriesComplete
+            : data.rankOverlay?.injuriesComplete,
         },
       });
       const when = json.fpUpdated ? ` · FP ${json.fpUpdated}` : "";

@@ -17,6 +17,7 @@ export type RankRefreshResult = {
   injuryMatched: number;
   injuryTotal: number;
   injuriesLive: boolean;
+  injuriesComplete: boolean;
   warnings: string[];
   error?: string;
 };
@@ -27,8 +28,7 @@ const UA =
 const INJURY_SEVERITY: Record<Injury, number> = { watch: 1, questionable: 2, out: 3 };
 
 const ESPN_INJURIES_URL = "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/injuries";
-const FP_NEWS_URL = "https://www.fantasypros.com/nfl/player-news.php";
-const FP_INJURED_URL = "https://www.fantasypros.com/nfl/injured-players.php";
+const FP_INJURY_PAGES = 7;
 
 function fpUrl(scoring: Scoring) {
   if (scoring === "ppr") return "https://www.fantasypros.com/nfl/rankings/ppr-cheatsheets.php";
@@ -36,6 +36,11 @@ function fpUrl(scoring: Scoring) {
     return "https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php";
   }
   return "https://www.fantasypros.com/nfl/rankings/consensus-cheatsheets.php";
+}
+
+function fpInjuryNewsUrl(page: number) {
+  if (page <= 1) return "https://www.fantasypros.com/nfl/injury-news.php";
+  return `https://www.fantasypros.com/nfl/injury-news.php?page=${page}`;
 }
 
 function dsSlug(scoring: Scoring) {
@@ -59,14 +64,8 @@ function posOf(raw: string): Position {
   return "DST";
 }
 
-function isSkillPos(raw?: string): boolean {
-  if (!raw) return false;
-  const p = raw.toUpperCase().replace(/[^A-Z]/g, "");
-  return p === "QB" || p === "RB" || p === "WR" || p === "TE" || p === "K" || p === "DST" || p === "DEF" || p === "D";
-}
-
 function idFor(name: string, pos?: string, team?: string): string | null {
-  if (pos && isSkillPos(pos) && team && team !== "FA") {
+  if (pos && team && team !== "FA") {
     const matched = matchOurPlayer(name, posOf(pos), team);
     if (matched) return matched;
   }
@@ -79,70 +78,86 @@ function worseInjury(a: Injury | undefined, b: Injury | undefined): Injury | und
   return INJURY_SEVERITY[b] > INJURY_SEVERITY[a] ? b : a;
 }
 
+function decodeHtml(raw: string) {
+  return raw
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&rsquo;/gi, "'")
+    .replace(/&lsquo;/gi, "'")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function slugToName(slug: string) {
   return slug.replace(/-/g, " ").replace(/\s+/g, " ").trim();
 }
 
-/** Map a source status + optional note onto Out / Q / Watch. */
-export function classifyInjury(
-  status: string,
-  comment = "",
-  hasInjuryDetails = false,
-): Injury | null {
+/**
+ * Map a source status + optional note onto Out / Q / Watch.
+ * `null` means healthy / clear; `undefined` is unused so callers can treat
+ * a missing structured field as "no info".
+ */
+export function classifyInjury(status: string, comment = ""): Injury | null {
   const s = status.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-  const c = comment.toLowerCase();
-  const blob = `${s} ${c}`;
+  const c = comment.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const blob = `${s} ${c}`.trim();
+  if (!blob) return null;
 
-  const commentOut =
-    /\binjured reserve\b/.test(c) ||
-    /\breserve\/pup\b/.test(c) ||
-    /\bpup list\b/.test(c) ||
-    /\bout for (the )?season\b/.test(c) ||
-    /\bseason[- ]ending\b/.test(c) ||
-    /\bout for (at least )?\d/.test(c) ||
-    /\bwill miss (at least )?\d/.test(c) ||
-    /\bplaced on (the )?(ir|injured reserve|pup)\b/.test(c) ||
-    (/\bdesignation to return\b/.test(c) && /\b(ir|pup|injured reserve)\b/.test(c));
+  const outish =
+    /^(out|o|ir|ir r|injured reserve|injury reserve|pup|nfi|sus|susp|suspended|suspension|inactive)$/.test(
+      s,
+    ) ||
+    /\binjured reserve\b/.test(blob) ||
+    /\breserve\/(?:injured|ir|pup|nfi)\b/.test(blob) ||
+    /\bpup list\b/.test(blob) ||
+    /\bphysically unable to perform\b/.test(blob) ||
+    /\bnon-football injury\b/.test(blob) ||
+    /\bout for (the )?season\b/.test(blob) ||
+    /\bseason[- ]ending\b/.test(blob) ||
+    /\brule[ds] out\b/.test(blob) ||
+    /\bwill miss at least\b/.test(blob) ||
+    /\bplaced (?:on|in) (?:the )?(?:ir|injured reserve|pup|nfi)\b/.test(blob) ||
+    /\b\((?:ir|pup|nfi|sus|out|o)\)\b/.test(blob) ||
+    /\bsuspended\b/.test(blob) ||
+    /\binactive\b/.test(blob);
 
-  if (
-    s === "out" ||
-    s === "o" ||
-    s === "injured reserve" ||
-    s === "injury reserve" ||
-    s === "injury_reserve" ||
-    s === "ir" ||
-    s === "ir r" ||
-    s === "suspension" ||
-    s === "suspended" ||
-    s === "doubtful" ||
-    s === "d" ||
-    s === "nfi" ||
-    /\bpup\b/.test(s) ||
-    commentOut
-  ) {
-    return "out";
-  }
+  if (outish) return "out";
 
-  if (
-    s === "questionable" ||
-    s === "q" ||
+  const qish =
+    /^(questionable|q|doubtful|d)$/.test(s) ||
     /\bquestionable\b/.test(blob) ||
-    /\bgame[- ]time decision\b/.test(blob)
-  ) {
-    return "questionable";
-  }
+    /\bdoubtful\b/.test(blob) ||
+    /\bgame[- ]time decision\b/.test(blob) ||
+    /\buncertain for\b/.test(blob) ||
+    /\bup in (the )?air\b/.test(blob) ||
+    /\bstatus in question\b/.test(blob) ||
+    /\b\((?:q|d)\)\b/.test(blob);
 
-  if (s === "active" || s === "healthy" || s === "a" || s === "normal") {
-    if (
-      hasInjuryDetails ||
-      /\b(limited|dnp|did not practice|misses practice|day to day|injury)\b/.test(c)
-    ) {
-      return "watch";
-    }
+  if (qish) return "questionable";
+
+  if (
+    /^(active|healthy|a|normal|ok)$/.test(s) &&
+    !/\b(limited|dnp|did not practice|misses practice|day to day|week to week)\b/.test(c)
+  ) {
     return null;
   }
 
-  if (/\b(watch|day to day|limited|dnp|misses practice|probable)\b/.test(blob)) return "watch";
+  if (
+    /^(watch|dtd|probable|p)$/.test(s) ||
+    /\b(watch|day to day|week to week|dtd|limited|dnp|did not practice|misses practice|missed practice|not seen at practice|not seen practicing|probable|expected to play|expects to play|could miss|positive update|returns to practice|non-contact)\b/.test(
+      blob,
+    ) ||
+    /\bpractices?\b/.test(blob) ||
+    /\((?:knee|ankle|hamstring|groin|toe|foot|shoulder|back|quad|calf|wrist|hand|elbow|hip|ribs?|neck|concussion|undisclosed|mcl|acl|pec)[^)]*\)/.test(
+      blob,
+    )
+  ) {
+    return "watch";
+  }
+
   return null;
 }
 
@@ -156,6 +171,7 @@ function ecrInjuryFields(p: Record<string, unknown>): string {
     "player_injury_status",
     "injuryStatus",
     "player_status",
+    "tag",
     "news",
     "injury_status_id",
   ];
@@ -189,44 +205,35 @@ export function parseFantasyProsEcr(html: string): {
   return { players, updated: data.last_updated };
 }
 
-export function parseFantasyProsInjuryHtml(html: string): InjuryHit[] {
+export function parseFantasyProsInjuryNews(html: string): InjuryHit[] {
   const hits: InjuryHit[] = [];
-  const ecr = html.match(/var ecrData\s*=\s*(\{[\s\S]*?\});/);
-  if (ecr) {
-    try {
-      for (const p of parseFantasyProsEcr(html).players) {
-        if (p.injury) hits.push({ name: p.name, pos: p.pos, team: p.team, injury: p.injury });
-      }
-    } catch {
-      /* rankings page without usable ecr injury fields */
-    }
-  }
-
-  const rowRe =
-    /href="\/nfl\/players\/([^"/]+)\.php"[^>]*>\s*([^<]+)<[\s\S]{0,900}?(?:injury|status|IR|Out|Questionable|Doubtful|PUP)[\s\S]{0,200}/gi;
-  let row: RegExpExecArray | null;
-  while ((row = rowRe.exec(html))) {
-    const snippet = row[0];
-    const statusBits = snippet.match(
-      /\b(Out|Questionable|Doubtful|IR(?:-R)?|PUP(?:-R)?|NFI|SUS|Suspended|Watch|Day-to-Day|DTD)\b/gi,
-    );
-    const injury = classifyInjury(statusBits?.join(" ") ?? snippet.replace(/<[^>]+>/g, " "));
+  const parts = html.split(/class="player-news-item"/).slice(1);
+  const seen = new Set<string>();
+  for (const part of parts) {
+    const chunk = part.slice(0, 5000);
+    const slug = chunk.match(/\/nfl\/players\/([^"/]+)\.php/)?.[1];
+    const alt = chunk.match(/alt="([^"]+)"/)?.[1];
+    const posTeam = chunk.match(/>([A-Z]{1,3})\s*-\s*([A-Z]{2,3})</);
+    const titleRaw =
+      chunk.match(/href="\/nfl\/news\/\d+\/[^"]+"[^>]*>([\s\S]*?)<\/a>/)?.[1] ?? "";
+    const title = decodeHtml(titleRaw);
+    if (!title) continue;
+    const key = title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const impact = chunk.match(/Fantasy Impact:<\/em><\/b>\s*([\s\S]*?)<\/p>/i)?.[1] ?? "";
+    const body = decodeHtml(impact);
+    const injury = classifyInjury(title, body);
     if (!injury) continue;
-    const fromSlug = slugToName(row[1]);
-    const fromText = row[2].replace(/\s+/g, " ").trim();
-    hits.push({ name: fromText || fromSlug, injury });
+    const name = decodeHtml(alt || "") || (slug ? slugToName(slug) : "");
+    if (!name || name.includes("More News")) continue;
+    hits.push({
+      name,
+      pos: posTeam?.[1],
+      team: posTeam?.[2],
+      injury,
+    });
   }
-
-  const newsRe =
-    /href="\/nfl\/players\/([^"/]+)\.php"[\s\S]{0,1200}?player-news-header[\s\S]{0,400}?<a href="\/nfl\/news\/[^"]+"[^>]*>([^<]+)/gi;
-  let news: RegExpExecArray | null;
-  while ((news = newsRe.exec(html))) {
-    const title = news[2].replace(/\s+/g, " ").trim();
-    const injury = classifyInjury(title, title, /\([^)]+\)/.test(title));
-    if (!injury) continue;
-    hits.push({ name: slugToName(news[1]), injury });
-  }
-
   return hits;
 }
 
@@ -262,11 +269,11 @@ export function parseDraftSharksInjuries(html: string): InjuryHit[] {
     ]
       .map((x) => x[1])
       .join(" ");
-    const badge = extra.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const text = `${labeled} ${badge}`.trim();
+    const paren = chunk.match(/\((IR|PUP|NFI|SUS|OUT|DTD|Q|D|O)\)/i)?.[1] ?? "";
+    const badge = decodeHtml(extra);
+    const text = `${labeled} ${badge} ${paren}`.trim();
     if (!text) continue;
-    // Seasonal injury_prob % is not a current designation — skip those cells.
-    if (/^\d+%$/.test(text) || /injury_prob/.test(chunk) && !badge && !labeled) continue;
+    if (/injury_prob/.test(chunk) && !badge && !labeled && !paren) continue;
     const injury = classifyInjury(text);
     if (!injury) continue;
     hits.push({ name: m[2].replace(/\s+/g, " ").trim(), pos: m[1], injury });
@@ -280,10 +287,9 @@ type EspnInjuryJson = {
     displayName?: string;
     injuries?: Array<{
       status?: string;
-      date?: string;
       shortComment?: string;
       longComment?: string;
-      type?: { description?: string; abbreviation?: string; name?: string };
+      type?: { description?: string; abbreviation?: string };
       details?: {
         type?: string;
         fantasyStatus?: { description?: string; abbreviation?: string };
@@ -312,7 +318,7 @@ export function parseEspnInjuries(raw: unknown): InjuryHit[] {
         inj.type?.abbreviation ||
         "";
       const comment = [inj.shortComment, inj.longComment].filter(Boolean).join(" ");
-      const injury = classifyInjury(status, comment, Boolean(details?.type));
+      const injury = classifyInjury(status, comment);
       if (!injury) continue;
       hits.push({
         name,
@@ -325,13 +331,18 @@ export function parseEspnInjuries(raw: unknown): InjuryHit[] {
   return hits;
 }
 
-function absorbHits(into: Map<string, Injury>, hits: InjuryHit[]) {
+function absorbHits(
+  into: Map<string, Injury>,
+  hits: InjuryHit[],
+  mode: "worse" | "first" | "overwrite",
+) {
   let total = 0;
   for (const hit of hits) {
     total += 1;
     const id = idFor(hit.name, hit.pos, hit.team);
     if (!id) continue;
-    const next = worseInjury(into.get(id), hit.injury);
+    if (mode === "first" && into.has(id)) continue;
+    const next = mode === "overwrite" ? hit.injury : worseInjury(into.get(id), hit.injury);
     if (next) into.set(id, next);
   }
   return total;
@@ -347,13 +358,12 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
   let fpMatched = 0;
   let dsMatched = 0;
   let injuryTotal = 0;
+  let injuriesComplete = false;
 
-  const fpJob = fetchText(fpUrl(scoring)).then((html) => ({
-    ecr: parseFantasyProsEcr(html),
-    injuries: parseFantasyProsInjuryHtml(html),
-  }));
-  const fpNewsJob = fetchText(FP_NEWS_URL).then(parseFantasyProsInjuryHtml);
-  const fpInjuredJob = fetchText(FP_INJURED_URL).then(parseFantasyProsInjuryHtml);
+  const fpJob = fetchText(fpUrl(scoring)).then(parseFantasyProsEcr);
+  const injJobs = Array.from({ length: FP_INJURY_PAGES }, (_, i) =>
+    fetchText(fpInjuryNewsUrl(i + 1)).then(parseFantasyProsInjuryNews),
+  );
   const dsUrl =
     "https://www.draftsharks.com/rankings/load-table?" +
     new URLSearchParams({
@@ -371,18 +381,17 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
   }));
   const espnJob = fetchText(ESPN_INJURIES_URL).then((text) => parseEspnInjuries(JSON.parse(text)));
 
-  const [fpRes, fpNewsRes, fpInjuredRes, dsRes, espnRes] = await Promise.allSettled([
+  const [fpRes, dsRes, espnRes, ...injRes] = await Promise.allSettled([
     fpJob,
-    fpNewsJob,
-    fpInjuredJob,
     dsJob,
     espnJob,
+    ...injJobs,
   ]);
 
   if (fpRes.status === "fulfilled") {
-    fpUpdated = fpRes.value.ecr.updated;
-    fpTotal = fpRes.value.ecr.players.length;
-    for (const p of fpRes.value.ecr.players) {
+    fpUpdated = fpRes.value.updated;
+    fpTotal = fpRes.value.players.length;
+    for (const p of fpRes.value.players) {
       const id = idFor(p.name, p.pos, p.team);
       if (!id) continue;
       const cur = patches.get(id) ?? {};
@@ -390,18 +399,36 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       patches.set(id, cur);
       fpMatched += 1;
     }
-    injuryTotal += absorbHits(injuries, fpRes.value.injuries);
+    injuryTotal += absorbHits(
+      injuries,
+      fpRes.value.players
+        .filter((p) => p.injury)
+        .map((p) => ({ name: p.name, pos: p.pos, team: p.team, injury: p.injury! })),
+      "first",
+    );
   } else {
     warnings.push(`FantasyPros: ${fpRes.reason instanceof Error ? fpRes.reason.message : "failed"}`);
   }
 
-  if (fpNewsRes.status === "fulfilled") {
-    injuryTotal += absorbHits(injuries, fpNewsRes.value);
+  const newsItems: InjuryHit[] = [];
+  const seenTitles = new Set<string>();
+  let injPagesOk = 0;
+  for (const res of injRes) {
+    if (res.status !== "fulfilled") {
+      warnings.push(
+        `FantasyPros injuries: ${res.reason instanceof Error ? res.reason.message : "failed"}`,
+      );
+      continue;
+    }
+    injPagesOk += 1;
+    for (const hit of res.value) {
+      const key = `${hit.name}|${hit.injury}`;
+      if (seenTitles.has(key)) continue;
+      seenTitles.add(key);
+      newsItems.push(hit);
+    }
   }
-
-  if (fpInjuredRes.status === "fulfilled") {
-    injuryTotal += absorbHits(injuries, fpInjuredRes.value);
-  }
+  injuryTotal += absorbHits(injuries, newsItems, "first");
 
   if (dsRes.status === "fulfilled") {
     dsTotal = dsRes.value.ranks.length;
@@ -413,15 +440,22 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       patches.set(id, cur);
       dsMatched += 1;
     }
-    injuryTotal += absorbHits(injuries, dsRes.value.injuries);
+    injuryTotal += absorbHits(injuries, dsRes.value.injuries, "worse");
   } else {
     warnings.push(`DraftSharks: ${dsRes.reason instanceof Error ? dsRes.reason.message : "failed"}`);
   }
 
   if (espnRes.status === "fulfilled") {
-    injuryTotal += absorbHits(injuries, espnRes.value);
+    injuryTotal += absorbHits(injuries, espnRes.value, "overwrite");
+    injuriesComplete = espnRes.value.length > 0;
   } else {
-    warnings.push(`ESPN injuries: ${espnRes.reason instanceof Error ? espnRes.reason.message : "failed"}`);
+    warnings.push(
+      `ESPN injuries: ${espnRes.reason instanceof Error ? espnRes.reason.message : "failed"}`,
+    );
+  }
+
+  if (injPagesOk === 0 && injRes.length > 0 && !injuriesComplete) {
+    warnings.push("FantasyPros injury news could not be loaded.");
   }
 
   const injuryMatched = injuries.size;
@@ -445,6 +479,7 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       injuryMatched: 0,
       injuryTotal,
       injuriesLive: false,
+      injuriesComplete: false,
       warnings,
       error: warnings.join(" · ") || "Could not refresh ranks or injuries.",
     };
@@ -468,6 +503,7 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
     injuryMatched,
     injuryTotal,
     injuriesLive,
+    injuriesComplete,
     warnings,
   };
 }
@@ -486,16 +522,22 @@ export function applyRankPatches(players: Player[], patches: Record<string, Rank
   });
 }
 
-/** When `live` is true, overlay replaces snapshot flags (missing id = healthy). */
+/**
+ * Overlay live injury flags. When `complete` is true (full ESPN report),
+ * players missing from the map are treated as healthy. Otherwise unmatched
+ * players keep their snapshot flag.
+ */
 export function applyInjuryOverlay(
   players: Player[],
   injuries: Record<string, Injury> | undefined,
   live?: boolean,
+  complete?: boolean,
 ) {
   if (!live || !injuries) return players;
   return players.map((p) => {
     const inj = injuries[p.id];
     if (inj) return p.injury === inj ? p : { ...p, injury: inj };
+    if (!complete) return p;
     if (!p.injury) return p;
     return { ...p, injury: undefined };
   });
