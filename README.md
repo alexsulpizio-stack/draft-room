@@ -37,14 +37,14 @@ JFL 28 on ESPN:
 
 ## ESPN live sync
 
-Two steps. No cookies.
+Works with **any** live ESPN draft — JFL 28, another league, or a mock. Two steps. No cookies.
 
 1. Drag the green **Sync ESPN** chip onto the Chrome bookmarks bar (Ctrl+Shift+B if the bar is hidden).
-2. Open the ESPN draft tab and click that bookmark. Leave the tab open.
+2. Open whatever ESPN draft tab is live (mock lobby, live lobby, or a league room) and click that bookmark. Leave the tab open.
 
-Draft Room listens in the background and fills the board as picks come in. Click the chip in Draft Room anytime for this reminder.
+Draft Room reads league ID, season, team count, league name, draft type, and your slot (`teamId`) from that page, then fills the board as picks come in. Click the chip in Draft Room anytime for this reminder.
 
-Cookies and a pasted pick log still exist under **Show cookies & paste** if a browser blocks the bookmark. You are already set to **JackAL, pick 5**.
+Cookies and a pasted pick log still exist under **Show cookies & paste** if a browser blocks the bookmark. Defaults stay **JackAL, pick 5** in JFL 28 until you sync a different room.
 
 ## How to draft this format
 

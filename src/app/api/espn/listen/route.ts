@@ -3,6 +3,7 @@ import {
   extrasFromMapped,
   loadEspnPlayers,
   mapEspnPicks,
+  mergeIngestMeta,
 } from "@/lib/espn";
 import { getIngest } from "@/lib/espn-ingest";
 
@@ -12,7 +13,7 @@ const STALE_MS = 12 * 60 * 1000;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const teamsCount = Number(url.searchParams.get("teams")) || 12;
+  const fallbackTeams = Number(url.searchParams.get("teams")) || 12;
   const last = getIngest();
   if (!last) {
     return NextResponse.json({
@@ -48,16 +49,20 @@ export async function GET(req: Request) {
       count: 0,
       ts: last.ts,
       href: last.href,
+      meta: last.meta,
     });
   }
 
-  const players = await loadEspnPlayers(2026);
+  const meta = mergeIngestMeta(last.meta, last.href, last.title);
+  const teamsCount = meta.teams || fallbackTeams;
+  const season = meta.season || 2026;
+  const players = await loadEspnPlayers(season);
   const mapped = mapEspnPicks({
     picks: last.picks,
     pickOrder: [],
     teamsCount,
     players,
-    draftType: "snake",
+    draftType: meta.draftType === "linear" ? "linear" : "snake",
   });
   return NextResponse.json({
     ok: true,
@@ -69,5 +74,6 @@ export async function GET(req: Request) {
     count: mapped.length,
     href: last.href,
     ts: last.ts,
+    meta: { ...meta, teams: teamsCount },
   });
 }

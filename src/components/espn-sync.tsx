@@ -17,11 +17,14 @@ import { pickOwner } from "@/lib/draft";
 import {
   buildBookmarklet,
   espnDraftRoomUrl,
-  espnLeagueHomeUrl,
+  ESPN_LIVE_LOBBY,
+  ESPN_MOCK_LOBBY,
   extrasFromMapped,
   matchByName,
   parseEspnPickLog,
+  patchSettingsFromEspnMeta,
   stubFromEspn,
+  type EspnIngestMeta,
   type EspnLeagueInfo,
   type MappedEspnPick,
 } from "@/lib/espn";
@@ -140,19 +143,19 @@ export function EspnSync({
 }: {
   settings: LeagueSettings;
   setSettings: (s: LeagueSettings) => void;
-  onPicksFromEspn: (picks: DraftPick[], extras: Player[]) => void;
+  onPicksFromEspn: (picks: DraftPick[], extras: Player[], settingsPatch?: LeagueSettings) => void;
   status: EspnLiveStatus;
   setStatus: (s: EspnLiveStatus) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [league, setLeague] = useState("1361349772");
+  const [league, setLeague] = useState("");
   const [season, setSeason] = useState(2026);
   const [swid, setSwid] = useState("");
   const [espnS2, setEspnS2] = useState("");
   const [info, setInfo] = useState<EspnLeagueInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState<"bookmark" | "league" | "draft" | null>(null);
+  const [copied, setCopied] = useState<"bookmark" | null>(null);
   const [pasteLog, setPasteLog] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [ingestHint, setIngestHint] = useState<string | null>(null);
@@ -182,9 +185,10 @@ export function EspnSync({
     () => window.location.origin,
     () => "",
   );
-  const bookmarkHref = origin ? buildBookmarklet(origin, settings.teams) : "javascript:void(0)";
-  const leagueHomeUrl = espnLeagueHomeUrl(settings.espnLeagueId || "1361349772", season);
-  const draftRoomUrl = espnDraftRoomUrl(settings.espnLeagueId || "1361349772", season);
+  const bookmarkHref = origin ? buildBookmarklet(origin) : "javascript:void(0)";
+  const draftRoomUrl = settings.espnLeagueId
+    ? espnDraftRoomUrl(settings.espnLeagueId, season)
+    : "";
 
   const persistAuth = (next: Auth) => {
     localStorage.setItem(AUTH_KEY, JSON.stringify(next));
@@ -195,7 +199,7 @@ export function EspnSync({
     setSwid(auth.swid);
     setEspnS2(auth.espnS2);
     const saved = readConn();
-    setLeague(saved?.leagueId || settings.espnLeagueId || "1361349772");
+    setLeague(saved?.leagueId || settings.espnLeagueId || "");
     setSeason(saved?.season || 2026);
     setOpen(true);
   };
@@ -344,26 +348,41 @@ export function EspnSync({
         href?: string;
         picks?: MappedEspnPick[];
         extras?: Player[];
+        meta?: EspnIngestMeta;
       };
       if (!json.ingest || !json.picks?.length) {
         if (!json.ingest) setIngestHint(null);
         return;
       }
+      const meta = json.meta ?? {};
+      const label =
+        meta.leagueName ||
+        (meta.leagueId ? `League ${meta.leagueId}` : "this ESPN draft");
       setIngestHint(
-        `${json.count} pick${json.count === 1 ? "" : "s"} from the ESPN tab${
-          json.href ? "" : ""
+        `${json.count} pick${json.count === 1 ? "" : "s"} from ${label}${
+          meta.teams ? ` · ${meta.teams} teams` : ""
         }.`,
       );
       if (readConn()?.live) return;
-      const sig = json.picks.map((p) => `${p.overall}:${p.playerId}`).join("|");
+      const sig = [
+        json.picks.map((p) => `${p.overall}:${p.playerId}`).join("|"),
+        meta.leagueId ?? "",
+        String(meta.teams ?? ""),
+        String(meta.slot ?? meta.teamId ?? ""),
+      ].join("#");
       if (sig === listenSig.current && statusRef.current.live) return;
       listenSig.current = sig;
-      onPicksRef.current(mappedToDraft(json.picks), json.extras ?? extrasFromMapped(json.picks));
+      const nextSettings = patchSettingsFromEspnMeta(settingsRef.current, meta);
+      onPicksRef.current(
+        mappedToDraft(json.picks),
+        json.extras ?? extrasFromMapped(json.picks),
+        nextSettings,
+      );
       setStatus({
         live: true,
         source: "room-capture",
         pickCount: json.picks.length,
-        leagueName: "ESPN draft tab",
+        leagueName: label,
       });
     } catch {
       /* next tick */
@@ -434,7 +453,7 @@ export function EspnSync({
     }
   };
 
-  const copyText = async (value: string, which: "bookmark" | "league" | "draft") => {
+  const copyText = async (value: string, which: "bookmark") => {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(which);
@@ -464,14 +483,14 @@ export function EspnSync({
         {status.live ? `Sync ESPN · ${status.pickCount}` : "Sync ESPN"}
       </BookmarkletAnchor>
       <a
-        href={leagueHomeUrl}
+        href={ESPN_MOCK_LOBBY}
         target="_blank"
         rel="noopener noreferrer"
-        title="Open JFL 28 on ESPN (league home)"
+        title="Open ESPN mock draft lobby"
         className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-card px-3 text-xs font-semibold text-foreground no-underline hover:bg-accent"
       >
         <ExternalLink className="size-3.5" />
-        JFL 28
+        ESPN drafts
       </a>
       <Sheet
         open={open}
@@ -481,10 +500,10 @@ export function EspnSync({
       >
         <SheetContent className="w-[480px] overflow-y-auto sm:max-w-[480px]">
           <SheetHeader>
-            <SheetTitle>Two steps to live ESPN</SheetTitle>
+            <SheetTitle>Sync any ESPN draft</SheetTitle>
             <SheetDescription>
-              No cookies. Drag the chip to your bookmarks bar, then click it on the ESPN draft tab.
-              Draft Room listens automatically.
+              Drag the chip to your bookmarks bar, then click it on whatever ESPN draft tab is live
+              — JFL 28, another league, or a mock. Draft Room reads that page.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">
@@ -542,58 +561,43 @@ export function EspnSync({
               </li>
               <li className="rounded-xl border border-border bg-card p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  2 · Open ESPN, then click the bookmark
+                  2 · Click it on the live ESPN tab
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  ESPN only opens the live draft room about an hour before 7:00 PM Thursday. Until then
-                  use league home. Tomorrow, use the draft room link, then click{" "}
-                  <span className="font-medium text-foreground">Sync ESPN</span> in the bookmarks bar.
+                  Stay on the ESPN draft or mock tab (any league size). Click{" "}
+                  <span className="font-medium text-foreground">Sync ESPN</span> in your bookmarks
+                  bar. A green badge appears on that page. Leave it open — Draft Room follows that
+                  room, including league ID, team count, and your slot when the URL has teamId.
                 </p>
                 <div className="mt-3 grid gap-2">
                   <a
-                    href={leagueHomeUrl}
+                    href={ESPN_MOCK_LOBBY}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground no-underline"
                   >
                     <ExternalLink className="size-4" />
-                    Open JFL 28 on ESPN
+                    ESPN mock lobby
                   </a>
-                  <p className="break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
-                    {leagueHomeUrl}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-fit"
-                    onClick={() => void copyText(leagueHomeUrl, "league")}
-                  >
-                    {copied === "league" ? <Check /> : <Copy />}
-                    {copied === "league" ? "Copied" : "Copy league URL"}
-                  </Button>
                   <a
-                    href={draftRoomUrl}
+                    href={ESPN_LIVE_LOBBY}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-semibold text-foreground no-underline hover:bg-accent"
                   >
                     <ExternalLink className="size-4" />
-                    Open draft room
+                    ESPN live draft lobby
                   </a>
-                  <p className="break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
-                    {draftRoomUrl}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-fit"
-                    onClick={() => void copyText(draftRoomUrl, "draft")}
-                  >
-                    {copied === "draft" ? <Check /> : <Copy />}
-                    {copied === "draft" ? "Copied" : "Copy draft URL"}
-                  </Button>
+                  {settings.espnLeagueId ? (
+                    <a
+                      href={draftRoomUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      Open current league draft room
+                    </a>
+                  ) : null}
                 </div>
                 {ingestHint ? (
                   <p className="mt-2 text-xs font-medium text-primary">{ingestHint}</p>

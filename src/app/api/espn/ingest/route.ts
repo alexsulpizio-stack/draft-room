@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ingestCorsHeaders, parseEspnPickLog, type EspnRawPick } from "@/lib/espn";
+import { ingestCorsHeaders, mergeIngestMeta, parseEspnPickLog, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 
 export const dynamic = "force-dynamic";
@@ -35,11 +35,19 @@ export async function GET(req: Request) {
     count: last?.picks.length ?? 0,
     ts: last?.ts ?? null,
     href: last?.href,
+    meta: last?.meta,
   });
 }
 
 export async function POST(req: Request) {
-  let body: { picks?: unknown; href?: string; title?: string; ts?: number; text?: string } = {};
+  let body: {
+    picks?: unknown;
+    href?: string;
+    title?: string;
+    ts?: number;
+    text?: string;
+    meta?: EspnIngestMeta;
+  } = {};
   const ct = req.headers.get("content-type") ?? "";
   try {
     if (ct.includes("application/json")) {
@@ -51,19 +59,25 @@ export async function POST(req: Request) {
   } catch {
     return cors(req, { ok: false, error: "Invalid JSON." }, 400);
   }
+  const meta = mergeIngestMeta(
+    body.meta,
+    typeof body.href === "string" ? body.href : undefined,
+    typeof body.title === "string" ? body.title : undefined,
+  );
   let picks = normalizePicks(body.picks);
   if (!picks.length && typeof body.text === "string" && body.text.trim()) {
-    picks = parseEspnPickLog(body.text);
+    picks = parseEspnPickLog(body.text, meta.teams || 12);
   }
   const previous = getIngest();
   if (!picks.length && previous?.picks.length) {
-    return cors(req, { ok: true, count: previous.picks.length, ignoredEmpty: true });
+    return cors(req, { ok: true, count: previous.picks.length, ignoredEmpty: true, meta: previous.meta });
   }
   setIngest({
     picks,
     href: typeof body.href === "string" ? body.href : undefined,
     title: typeof body.title === "string" ? body.title : undefined,
     ts: Number(body.ts) || Date.now(),
+    meta,
   });
-  return cors(req, { ok: true, count: picks.length });
+  return cors(req, { ok: true, count: picks.length, meta });
 }

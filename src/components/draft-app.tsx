@@ -1017,13 +1017,25 @@ function SettingsSheet({
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-4 px-4 pb-8">
-          <div className="rounded-xl border border-border bg-muted/50 p-3 text-sm">
-            <p className="font-medium">Starters (8) + 6 bench + 2 IR</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              QB · RB · RB/WR · WR · WR · WR · TE · K. No D/ST. RB/WR is not a full FLEX — TEs cannot
-              play it. First downs are 0.25 rushing and receiving.
-            </p>
-          </div>
+          {settings.espnLeagueId === "1361349772" ? (
+            <div className="rounded-xl border border-border bg-muted/50 p-3 text-sm">
+              <p className="font-medium">Starters (8) + 6 bench + 2 IR</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                QB · RB · RB/WR · WR · WR · WR · TE · K. No D/ST. RB/WR is not a full FLEX — TEs cannot
+                play it. First downs are 0.25 rushing and receiving.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-border bg-muted/50 p-3 text-sm">
+              <p className="font-medium">
+                {settings.teams} teams · you are pick {settings.slot}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Team count and names come from the ESPN tab you synced. Recs follow the roster
+                below — edit scoring and rounds if this mock uses a different format.
+              </p>
+            </div>
+          )}
           <Field label="Your slot">
             <select
               className="h-9 rounded-lg border border-input bg-background px-2 text-sm"

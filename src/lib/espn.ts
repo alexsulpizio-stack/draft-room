@@ -6,6 +6,19 @@ import { DEFAULT_SETTINGS } from "./types";
 
 export const ESPN_API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
 export const ESPN_FANTASY_ORIGIN = "https://fantasy.espn.com";
+export const ESPN_MOCK_LOBBY = `${ESPN_FANTASY_ORIGIN}/football/mockdraftlobby`;
+export const ESPN_LIVE_LOBBY = `${ESPN_FANTASY_ORIGIN}/football/livedraftlobby`;
+
+export type EspnIngestMeta = {
+  leagueId?: string;
+  season?: number;
+  teams?: number;
+  teamId?: number;
+  slot?: number;
+  leagueName?: string;
+  draftType?: DraftType;
+  teamNames?: string[];
+};
 
 export function espnLeagueHomeUrl(leagueId: string, season = 2026) {
   const id = parseLeagueId(leagueId) || leagueId.trim();
@@ -15,6 +28,79 @@ export function espnLeagueHomeUrl(leagueId: string, season = 2026) {
 export function espnDraftRoomUrl(leagueId: string, season = 2026) {
   const id = parseLeagueId(leagueId) || leagueId.trim();
   return `${ESPN_FANTASY_ORIGIN}/football/draft?leagueId=${id}&seasonId=${season}`;
+}
+
+export function parseTeamId(input: string): number | null {
+  const m = input.match(/[?&]teamId=(\d+)/i);
+  return m ? Number(m[1]) : null;
+}
+
+export function clampEspnTeams(n: number | undefined | null): number | undefined {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 2 || v > 20) return undefined;
+  return Math.round(v);
+}
+
+export function parseEspnHref(href?: string): EspnIngestMeta {
+  if (!href) return {};
+  const leagueId = parseLeagueId(href) ?? undefined;
+  const seasonRaw = parseSeason(href, 0);
+  const teamId = parseTeamId(href) ?? undefined;
+  return {
+    leagueId,
+    season: seasonRaw || undefined,
+    teamId: teamId && teamId > 0 ? teamId : undefined,
+  };
+}
+
+export function mergeIngestMeta(
+  body: EspnIngestMeta | undefined,
+  href?: string,
+  title?: string,
+): EspnIngestMeta {
+  const fromHref = parseEspnHref(href);
+  const teams = clampEspnTeams(body?.teams);
+  const leagueName = body?.leagueName?.trim()
+    || (title && !/^Fantasy Football/i.test(title) ? title.trim() : undefined);
+  const slot = body?.slot && body.slot >= 1 && body.slot <= 20 ? body.slot : undefined;
+  const teamId = body?.teamId || fromHref.teamId;
+  return {
+    ...fromHref,
+    ...body,
+    leagueId: body?.leagueId || fromHref.leagueId,
+    season: body?.season || fromHref.season,
+    teamId,
+    teams,
+    slot: slot || (teamId && teams && teamId <= teams ? teamId : undefined),
+    leagueName,
+    draftType: body?.draftType === "linear" ? "linear" : body?.draftType === "snake" ? "snake" : undefined,
+  };
+}
+
+export function patchSettingsFromEspnMeta(
+  current: LeagueSettings,
+  meta: EspnIngestMeta,
+): LeagueSettings {
+  const teams = clampEspnTeams(meta.teams) ?? current.teams;
+  let slot = current.slot;
+  if (meta.slot && meta.slot >= 1 && meta.slot <= teams) slot = meta.slot;
+  else if (meta.teamId && meta.teamId >= 1 && meta.teamId <= teams) slot = meta.teamId;
+  const switchedLeague = Boolean(meta.leagueId && meta.leagueId !== current.espnLeagueId);
+  const names =
+    meta.teamNames && meta.teamNames.length === teams
+      ? meta.teamNames
+      : switchedLeague || current.teamNames.length !== teams
+        ? Array.from({ length: teams }, (_, i) => `Team ${i + 1}`)
+        : current.teamNames;
+  return {
+    ...current,
+    teams,
+    slot,
+    espnLeagueId: meta.leagueId || current.espnLeagueId,
+    leagueName: meta.leagueName || current.leagueName,
+    draftType: meta.draftType ?? current.draftType,
+    teamNames: names,
+  };
 }
 
 /** ESPN proTeamId → NFL abbreviation. */
@@ -614,30 +700,12 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
   return picks;
 }
 
-export function buildBookmarklet(origin: string, teams = 12): string {
+export function buildBookmarklet(origin: string): string {
   const code = `(function(){
 var O=${JSON.stringify(origin.replace(/\/$/, ""))};
-var T=${Number(teams) || 12};
-function walk(root,d,out,seen){
-  if(!root||d>18)return out;
-  if(Array.isArray(root)){
-    if(root.length&&root[0]&&typeof root[0]==="object"&&("playerId"in root[0]||"overallPickNumber"in root[0])){
-      root.forEach(function(p){push(p,out,seen);});
-      return out;
-    }
-    root.slice(0,120).forEach(function(x){walk(x,d+1,out,seen);});
-    return out;
-  }
-  if(typeof root!=="object")return out;
-  if(root.picks&&Array.isArray(root.picks)) root.picks.forEach(function(p){push(p,out,seen);});
-  if(root.draftDetail&&root.draftDetail.picks) root.draftDetail.picks.forEach(function(p){push(p,out,seen);});
-  var keys=Object.keys(root);
-  for(var i=0;i<keys.length;i++){
-    var k=keys[i];
-    if(k.indexOf("__")==0) continue;
-    try{walk(root[k],d+1,out,seen);}catch(e){}
-  }
-  return out;
+function takeSize(n){
+  n=Number(n);
+  return (n>=2&&n<=20)?n:0;
 }
 function push(p,out,seen){
   if(!p||typeof p!=="object")return;
@@ -651,8 +719,69 @@ function push(p,out,seen){
   seen[key]=1;
   out.push({overallPickNumber:overall,playerId:playerId,teamId:Number(p.teamId||p.team||0),playerName:name});
 }
-function fromFiber(){
-  var out=[],seen={};
+function walkPicks(root,d,out,seen){
+  if(!root||d>18)return out;
+  if(Array.isArray(root)){
+    if(root.length&&root[0]&&typeof root[0]==="object"&&("playerId"in root[0]||"overallPickNumber"in root[0])){
+      root.forEach(function(p){push(p,out,seen);});
+      return out;
+    }
+    root.slice(0,120).forEach(function(x){walkPicks(x,d+1,out,seen);});
+    return out;
+  }
+  if(typeof root!=="object")return out;
+  if(root.picks&&Array.isArray(root.picks)) root.picks.forEach(function(p){push(p,out,seen);});
+  if(root.draftDetail&&root.draftDetail.picks) root.draftDetail.picks.forEach(function(p){push(p,out,seen);});
+  var keys=Object.keys(root);
+  for(var i=0;i<keys.length;i++){
+    var k=keys[i];
+    if(k.indexOf("__")==0) continue;
+    try{walkPicks(root[k],d+1,out,seen);}catch(e){}
+  }
+  return out;
+}
+function metaWalk(root,d,meta,seen){
+  if(!root||d>12||typeof root!=="object")return;
+  if(seen.has(root))return;
+  seen.add(root);
+  try{
+    var size=takeSize(root.size)||takeSize(root.teamCount)||takeSize(root.numTeams);
+    if(size) meta.teams=size;
+    if(root.settings){
+      size=takeSize(root.settings.size);
+      if(size) meta.teams=size;
+      if(typeof root.settings.name==="string"&&root.settings.name.length>1) meta.leagueName=root.settings.name;
+      var ds=root.settings.draftSettings||root.draftSettings;
+      if(ds){
+        size=takeSize(ds.numTeams)||takeSize(ds.leagueSize);
+        if(size) meta.teams=size;
+        var ot=String(ds.orderType||ds.type||"");
+        if(/LINEAR/i.test(ot)&&!/SNAKE/i.test(ot)) meta.draftType="linear";
+      }
+    }
+    if(Array.isArray(root.teams)&&root.teams.length>=2&&root.teams.length<=20){
+      if(!meta.teams) meta.teams=root.teams.length;
+      if(!meta.teamNames||meta.teamNames.length!==root.teams.length){
+        meta.teamNames=root.teams.map(function(t,i){
+          if(!t||typeof t!=="object") return "Team "+(i+1);
+          var n=((t.location||"")+" "+(t.nickname||"")).trim()||t.name||t.abbrev||("Team "+(i+1));
+          return n;
+        });
+      }
+    }
+    if(Array.isArray(root)){
+      root.slice(0,50).forEach(function(x){metaWalk(x,d+1,meta,seen);});
+      return;
+    }
+    var keys=Object.keys(root);
+    for(var i=0;i<Math.min(keys.length,36);i++){
+      var k=keys[i];
+      if(k.indexOf("__")==0) continue;
+      metaWalk(root[k],d+1,meta,seen);
+    }
+  }catch(e){}
+}
+function eachFiber(fn){
   var nodes=document.querySelectorAll('[class*="draft"],[id*="draft"],[class*="Draft"],main,#fitt-analytics,#pane-main,body');
   var max=Math.min(nodes.length,40);
   for(var i=0;i<max;i++){
@@ -661,21 +790,54 @@ function fromFiber(){
     for(var j=0;j<ks.length;j++){
       var f=el[ks[j]], depth=0;
       while(f&&depth<14){
-        if(f.memoizedState) walk(f.memoizedState,0,out,seen);
-        if(f.memoizedProps) walk(f.memoizedProps,0,out,seen);
+        fn(f);
         f=f.return; depth++;
       }
     }
-    if(out.length>3) break;
   }
+}
+function pageMeta(){
+  var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null};
+  try{
+    var sp=new URLSearchParams(location.search);
+    meta.leagueId=sp.get("leagueId")||"";
+    meta.season=Number(sp.get("seasonId")||0)||0;
+    meta.teamId=Number(sp.get("teamId")||0)||0;
+  }catch(e){}
+  var seen=new Set();
+  eachFiber(function(f){
+    if(f.memoizedState) metaWalk(f.memoizedState,0,meta,seen);
+    if(f.memoizedProps) metaWalk(f.memoizedProps,0,meta,seen);
+  });
   try{
     ["store","__STORE__","__APP_STATE__","espn"].forEach(function(k){
-      if(window[k]) walk(window[k],0,out,seen);
+      if(window[k]) metaWalk(window[k],0,meta,seen);
+    });
+  }catch(e){}
+  if(!meta.teams){
+    var text=document.body.innerText||"";
+    var re=/\\b1\\.(\\d{2})\\b/g,m,max=0;
+    while((m=re.exec(text))) max=Math.max(max,Number(m[1]));
+    meta.teams=takeSize(max);
+  }
+  if(!meta.teams) meta.teams=12;
+  if(meta.teamId>=1&&meta.teamId<=meta.teams) meta.slot=meta.teamId;
+  return meta;
+}
+function fromFiber(){
+  var out=[],seen={};
+  eachFiber(function(f){
+    if(f.memoizedState) walkPicks(f.memoizedState,0,out,seen);
+    if(f.memoizedProps) walkPicks(f.memoizedProps,0,out,seen);
+  });
+  try{
+    ["store","__STORE__","__APP_STATE__","espn"].forEach(function(k){
+      if(window[k]) walkPicks(window[k],0,out,seen);
     });
   }catch(e){}
   return out;
 }
-function fromDom(out,seen){
+function fromDom(out,seen,T){
   var text=document.body.innerText||"";
   var re=/(?:^|\\n)\\s*(\\d{1,2})\\.(\\d{2})\\s+([A-Z][A-Za-z.'\\- ]{2,40})/g;
   var m,i=0;
@@ -690,11 +852,10 @@ function fromDom(out,seen){
     push({overallPickNumber:out.length+1,playerId:id,teamId:0,playerName:name},out,seen);
   });
 }
-function collect(){
+function collect(T){
   var seen={},out=fromFiber();
-  fromDom(out,seen);
-  var seen2={};
-  var uniq=[];
+  fromDom(out,seen,T);
+  var seen2={},uniq=[];
   out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
   out.forEach(function(p){
     if(seen2[p.overallPickNumber]){
@@ -707,34 +868,39 @@ function collect(){
   uniq.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
   return uniq;
 }
-function badge(n,err){
+function badge(n,meta,err){
   var b=document.getElementById("draft-room-sync");
   if(!b){
     b=document.createElement("div");
     b.id="draft-room-sync";
-    b.style.cssText="position:fixed;bottom:16px;left:16px;z-index:2147483647;background:#1f6a45;color:#fff;padding:10px 14px;border-radius:12px;font:13px/1.35 system-ui,sans-serif;box-shadow:0 8px 24px #0005";
+    b.style.cssText="position:fixed;bottom:16px;left:16px;z-index:2147483647;background:#1f6a45;color:#fff;padding:10px 14px;border-radius:12px;font:13px/1.35 system-ui,sans-serif;box-shadow:0 8px 24px #0005;max-width:280px";
     document.body.appendChild(b);
   }
   b.style.background=err?"#9b1c1c":"#1f6a45";
-  b.textContent=err?("Draft Room · "+err):("Draft Room is syncing · "+n+" picks. Leave this tab open.");
+  var label=(meta&&meta.leagueName)?meta.leagueName:(meta&&meta.leagueId)?("League "+meta.leagueId):"this ESPN draft";
+  b.textContent=err?("Draft Room · "+err):("Draft Room is syncing "+n+" picks from "+label+". Leave this tab open.");
 }
-function send(picks){
-  if(!picks||!picks.length){ badge(0); return; }
-  var body=JSON.stringify({picks:picks,href:location.href,title:document.title,ts:Date.now()});
+function send(picks,meta){
+  if(!picks||!picks.length){ badge(0,meta); return; }
+  var payload={picks:picks,href:location.href,title:document.title,ts:Date.now(),meta:meta};
+  var body=JSON.stringify(payload);
   return fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:body,mode:"cors"}).then(function(r){
     if(!r.ok) throw new Error("HTTP "+r.status);
-    badge(picks.length);
+    badge(picks.length,meta);
   }).catch(function(e){
     try{navigator.sendBeacon(O+"/api/espn/ingest",new Blob([body],{type:"application/json"}));}catch(e2){}
-    badge(picks.length,String(e.message||e));
+    badge(picks.length,meta,String(e.message||e));
   });
 }
-function tick(){ send(collect()); }
+function tick(){
+  var meta=pageMeta();
+  send(collect(meta.teams||12),meta);
+}
 tick();
 if(!window.__draftRoomEspn){
   window.__draftRoomEspn=setInterval(tick,1500);
 }
-badge(0);
+badge(0,pageMeta());
 })();`;
   return `javascript:${encodeURIComponent(code)}`;
 }

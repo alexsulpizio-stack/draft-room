@@ -1,10 +1,11 @@
-import type { EspnRawPick } from "./espn";
+import type { EspnIngestMeta, EspnRawPick } from "./espn";
 
 export type IngestPayload = {
   picks: EspnRawPick[];
   href?: string;
   title?: string;
   ts: number;
+  meta?: EspnIngestMeta;
 };
 
 let last: IngestPayload | null = null;

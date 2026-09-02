@@ -47,9 +47,10 @@ export async function POST(req: Request) {
       const mapped = mapEspnPicks({
         picks: ingest.picks,
         pickOrder: [],
-        teamsCount: Number(body.teams) || 12,
+        teamsCount: ingest.meta?.teams || Number(body.teams) || 12,
         players,
-        draftType: body.draftType === "linear" ? "linear" : "snake",
+        draftType:
+          ingest.meta?.draftType === "linear" || body.draftType === "linear" ? "linear" : "snake",
       });
       return NextResponse.json({
         ok: true,
