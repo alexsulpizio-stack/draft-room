@@ -315,6 +315,177 @@ export function normalizePlayerName(s: string) {
     .trim();
 }
 
+/** Lowercased name with spaces removed — "Ja Marr Chase" and "Ja'Marr Chase" both become jamarrchase. */
+export function compactPlayerName(s: string) {
+  return normalizePlayerName(s).replace(/\s+/g, "");
+}
+
+function nameTokens(s: string) {
+  return normalizePlayerName(s).split(" ").filter(Boolean);
+}
+
+function lastNameOf(s: string) {
+  const parts = nameTokens(s);
+  return parts[parts.length - 1] ?? "";
+}
+
+function firstNameOf(s: string) {
+  return nameTokens(s)[0] ?? "";
+}
+
+/** "Chase, Ja'Marr" → "Ja'Marr Chase". Leave already-forward names alone. */
+export function flipLastFirst(name: string) {
+  const comma = name.indexOf(",");
+  if (comma <= 0) return name;
+  const last = name.slice(0, comma).trim();
+  const first = name.slice(comma + 1).trim();
+  if (!last || !first) return name;
+  return `${first} ${last}`;
+}
+
+const FIRST_ALIASES: Record<string, string> = {
+  cam: "cameron",
+  cameron: "cameron",
+  kenny: "kenneth",
+  ken: "kenneth",
+  kenneth: "kenneth",
+  mike: "michael",
+  michael: "michael",
+  matt: "matthew",
+  matthew: "matthew",
+  chris: "christopher",
+  christopher: "christopher",
+  alex: "alexander",
+  alexander: "alexander",
+  nick: "nicholas",
+  nicholas: "nicholas",
+  josh: "joshua",
+  joshua: "joshua",
+  jake: "jacob",
+  jacob: "jacob",
+  will: "william",
+  william: "william",
+  rob: "robert",
+  bob: "robert",
+  bobby: "robert",
+  robert: "robert",
+  chig: "chigoziem",
+  chigoziem: "chigoziem",
+};
+
+function canonicalFirst(first: string) {
+  return FIRST_ALIASES[first] ?? first;
+}
+
+/** Cam/Cameron, Kenny/Kenneth; not J/Jonathan and not J'Mari/Jonathan. */
+export function firstNamesCompatible(a: string, b: string) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (canonicalFirst(a) === canonicalFirst(b)) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.length >= 3 && long.startsWith(short);
+}
+
+export function parseRankPos(raw?: string): Position | undefined {
+  if (!raw) return undefined;
+  const p = raw.toUpperCase().replace(/[^A-Z]/g, "");
+  if (p === "QB" || p === "RB" || p === "WR" || p === "TE" || p === "K") return p;
+  if (p === "DST" || p === "DEF" || p === "D") return "DST";
+  return undefined;
+}
+
+export function canonicalNflTeam(team?: string): string | undefined {
+  if (!team) return undefined;
+  const t = team.toUpperCase().replace(/[^A-Z]/g, "");
+  if (!t || t === "FA" || t === "NFLE") return undefined;
+  if (t === "JAC") return "JAX";
+  if (t === "LA") return "LAR";
+  if (t === "WSH") return "WAS";
+  if (t === "GBP") return "GB";
+  if (t === "KCC") return "KC";
+  if (t === "NEP") return "NE";
+  if (t === "NOS") return "NO";
+  if (t === "SFO") return "SF";
+  if (t === "TBB") return "TB";
+  return t;
+}
+
+function pickUnique(players: Player[]): Player | undefined {
+  return players.length === 1 ? players[0] : undefined;
+}
+
+function sameTeamPos(p: Player, pos?: Position, team?: string) {
+  if (pos && p.pos !== pos) return false;
+  if (team && p.team !== team) return false;
+  return true;
+}
+
+/**
+ * Overlay matching for FantasyPros / DraftSharks (full names, not ESPN "J. Taylor").
+ *
+ * Order: (normalized full name + team + pos) → unique full name → unique compact
+ * name → DST mascot/team → unique last name with compatible first name.
+ * Never last-name-only, even if our board has only one Taylor — that is how
+ * J'Mari Taylor (JAC) overwrote Jonathan Taylor.
+ */
+export function matchRankingSource(
+  name: string,
+  opts?: { pos?: string; team?: string },
+): Player | undefined {
+  const pos = parseRankPos(opts?.pos);
+  if (opts?.pos && !pos) return undefined;
+  const team = canonicalNflTeam(opts?.team);
+
+  const candidates = [name.trim(), flipLastFirst(name)].filter((n, i, arr) => n && arr.indexOf(n) === i);
+  const idx = getNameIndex();
+
+  for (const raw of candidates) {
+    const n = normalizePlayerName(raw);
+    if (!n) continue;
+    const compact = n.replace(/\s+/g, "");
+
+    const exact = PLAYERS.filter((p) => normalizePlayerName(p.name) === n);
+    const exactTeamPos = exact.filter((p) => sameTeamPos(p, pos, team));
+    if (pos && team && exactTeamPos.length === 1) return exactTeamPos[0];
+    const uniqueExact = pickUnique(exact);
+    if (uniqueExact) return uniqueExact;
+
+    const compacted = PLAYERS.filter((p) => compactPlayerName(p.name) === compact);
+    const compactTeamPos = compacted.filter((p) => sameTeamPos(p, pos, team));
+    if (pos && team && compactTeamPos.length === 1) return compactTeamPos[0];
+    const uniqueCompact = pickUnique(compacted);
+    if (uniqueCompact) return uniqueCompact;
+  }
+
+  if (!pos || pos === "DST") {
+    if (team) {
+      const byTeam = idx.dstByTeam.get(team);
+      if (byTeam) return byTeam;
+    }
+    for (const raw of candidates) {
+      const mascot = lastNameOf(raw);
+      if (!mascot) continue;
+      const dst = PLAYERS.filter((p) => p.pos === "DST" && compactPlayerName(p.name) === mascot);
+      const hit = pickUnique(dst);
+      if (hit) return hit;
+    }
+  }
+
+  for (const raw of candidates) {
+    const last = lastNameOf(raw);
+    const first = firstNameOf(raw);
+    if (!last || !first) continue;
+    const sameLast = PLAYERS.filter((p) => lastNameOf(p.name) === last);
+    if (sameLast.length !== 1) continue;
+    const only = sameLast[0];
+    if (pos && only.pos !== pos) continue;
+    if (!firstNamesCompatible(first, firstNameOf(only.name))) continue;
+    return only;
+  }
+
+  return undefined;
+}
+
 type NameIndex = {
   byName: Map<string, Player>;
   byLastTeamPos: Map<string, Player>;

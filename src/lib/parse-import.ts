@@ -1,5 +1,4 @@
-import { slugifyName } from "./draft";
-import { PLAYERS } from "./players";
+import { matchRankingSource } from "./espn";
 import type { Player } from "./types";
 
 function clean(s: string) {
@@ -91,11 +90,7 @@ export function parseRankingPaste(text: string): {
 }
 
 function matchPlayer(name: string): Player | undefined {
-  const s = slugifyName(name);
-  const direct = PLAYERS.find((p) => p.id === s);
-  if (direct) return direct;
-  const lower = name.toLowerCase();
-  return PLAYERS.find((p) => p.name.toLowerCase() === lower);
+  return matchRankingSource(name);
 }
 
 export function applyUpdates(

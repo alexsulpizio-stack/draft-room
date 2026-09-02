@@ -1,4 +1,5 @@
-import { matchByName } from "./espn";
+import { UNRANKED } from "./draft";
+import { matchRankingSource } from "./espn";
 import type { Injury, Player, Scoring } from "./types";
 
 export type RankPatch = { fpRank?: number; dsRank?: number; adp?: number };
@@ -62,18 +63,16 @@ async function fetchText(url: string, extra?: HeadersInit) {
 /**
  * Map a ranking-source name onto our board.
  *
- * Full-name match only. `matchOurPlayer`'s last-name+pos fallback is for ESPN
- * abbreviations like "J. Taylor" / IND; on a 700-player ECR list it maps
- * J'Mari Taylor (JAC RB, rank_ecr 382) onto Jonathan Taylor and overwrites
- * a top-10 fpRank with 382.
+ * Uses full-name matching (apostrophes, Jr./III, Cam/Cameron) with team+pos
+ * when present. Never last-name-only — that maps J'Mari Taylor (JAC RB 382)
+ * onto Jonathan Taylor and Jayden Higgins onto Tee Higgins.
  */
-function idFor(name: string): string | null {
-  return matchByName(name)?.id ?? null;
+function idFor(name: string, pos?: string, team?: string): string | null {
+  return matchRankingSource(name, { pos, team })?.id ?? null;
 }
 
-function idForInjury(name: string): string | null {
-  // Full-name match only. Last-name fallback would map Jayden Higgins → Tee Higgins.
-  return matchByName(name)?.id ?? null;
+function idForInjury(name: string, pos?: string, team?: string): string | null {
+  return matchRankingSource(name, { pos, team })?.id ?? null;
 }
 
 function worseInjury(a: Injury | undefined, b: Injury | undefined): Injury | undefined {
@@ -385,7 +384,7 @@ function absorbHits(
   let total = 0;
   for (const hit of hits) {
     total += 1;
-    const id = idForInjury(hit.name);
+    const id = idForInjury(hit.name, hit.pos, hit.team);
     if (!id) continue;
     if (hit.seen) seen.add(id);
     if (opts.skipSeen && seen.has(id) && !hit.seen) continue;
@@ -450,7 +449,7 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
     fpUpdated = fpRes.value.updated;
     fpTotal = fpRes.value.players.length;
     for (const p of fpRes.value.players) {
-      const id = idFor(p.name);
+      const id = idFor(p.name, p.pos, p.team);
       if (!id || p.rank <= 0) continue;
       const cur = patches.get(id) ?? {};
       const next = takeBetterRank(cur.fpRank, p.rank);
@@ -479,7 +478,7 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
   if (dsRes.status === "fulfilled") {
     dsTotal = dsRes.value.ranks.length;
     for (const p of dsRes.value.ranks) {
-      const id = idFor(p.name);
+      const id = idFor(p.name, p.pos);
       if (!id || p.rank <= 0) continue;
       const cur = patches.get(id) ?? {};
       const next = takeBetterRank(cur.dsRank, p.rank);
@@ -552,9 +551,10 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
 }
 
 function keepRank(next: number | undefined, prev: number) {
-  return typeof next === "number" && Number.isFinite(next) && next > 0 && next < 900 ? next : prev;
+  return typeof next === "number" && Number.isFinite(next) && next > 0 && next < UNRANKED ? next : prev;
 }
 
+/** Overlay only replaces a rank when this player matched. Unmatched rows keep the snapshot integer (never blank to —). */
 export function applyRankPatches(players: Player[], patches: Record<string, RankPatch> | undefined) {
   if (!patches || Object.keys(patches).length === 0) return players;
   return players.map((p) => {
