@@ -69,8 +69,8 @@ export function parseRankingPaste(text: string): {
       return;
     }
     const next = updates.get(hit.id) ?? {};
-    if (rank && Number.isFinite(rank)) next.fpRank = rank;
-    if (adp && Number.isFinite(adp)) next.adp = adp;
+    if (rank && Number.isFinite(rank) && rank > 0) next.fpRank = rank;
+    if (adp != null && Number.isFinite(adp) && adp > 0) next.adp = adp;
     updates.set(hit.id, next);
   });
 
@@ -100,8 +100,8 @@ export function applyUpdates(
     if (!u) return p;
     return {
       ...p,
-      fpRank: u.fpRank ?? p.fpRank,
-      adp: u.adp ?? p.adp,
+      fpRank: u.fpRank != null && u.fpRank > 0 ? u.fpRank : p.fpRank,
+      adp: u.adp != null && u.adp > 0 && u.adp < 900 ? u.adp : p.adp,
     };
   });
 }

@@ -146,7 +146,7 @@ export function isUnknownNflTeam(team: string | undefined | null): boolean {
 }
 
 export function isSentinelAdp(n: number | undefined | null): boolean {
-  return n == null || !Number.isFinite(n) || n <= 0;
+  return n == null || !Number.isFinite(n) || n <= 0 || n >= 900;
 }
 
 export function isSentinelBye(n: number | undefined | null): boolean {

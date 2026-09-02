@@ -218,7 +218,7 @@ function ecrInjuryFields(p: Record<string, unknown>): string {
 }
 
 export function parseFantasyProsEcr(html: string): {
-  players: Array<{ name: string; rank: number; team: string; pos: string; injury?: Injury }>;
+  players: Array<{ name: string; rank: number; team: string; pos: string; injury?: Injury; adp?: number }>;
   updated?: string;
 } {
   const m = html.match(/var ecrData\s*=\s*(\{[\s\S]*?\});/);
@@ -234,7 +234,15 @@ export function parseFantasyProsEcr(html: string): {
       const team = String(p.player_team_id ?? "FA");
       const pos = String(p.player_position_id ?? "");
       const injury = classifyInjury(ecrInjuryFields(p));
-      return { name, rank, team, pos, ...(injury ? { injury } : {}) };
+      const adp = Number(p.rank_ave ?? p.rank_adp ?? p.adp ?? p.player_adp);
+      return {
+        name,
+        rank,
+        team,
+        pos,
+        ...(injury ? { injury } : {}),
+        ...(Number.isFinite(adp) && adp > 0 ? { adp } : {}),
+      };
     })
     .filter((p) => p.name && Number.isFinite(p.rank) && p.rank > 0);
   return { players, updated: data.last_updated };
@@ -437,11 +445,17 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       const id = idFor(p.name, p.pos, p.team);
       if (!id) continue;
       const cur = patches.get(id) ?? {};
+      let changed = false;
       if (p.rank > 0) {
         cur.fpRank = p.rank;
-        patches.set(id, cur);
         fpMatched += 1;
+        changed = true;
       }
+      if (p.adp && p.adp > 0) {
+        cur.adp = p.adp;
+        changed = true;
+      }
+      if (changed) patches.set(id, cur);
     }
     injuryTotal += absorbHits(
       injuries,
@@ -538,7 +552,7 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
 }
 
 function keepRank(next: number | undefined, prev: number) {
-  return typeof next === "number" && Number.isFinite(next) && next > 0 ? next : prev;
+  return typeof next === "number" && Number.isFinite(next) && next > 0 && next < 900 ? next : prev;
 }
 
 export function applyRankPatches(players: Player[], patches: Record<string, RankPatch> | undefined) {
