@@ -700,173 +700,72 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
   return picks;
 }
 
+/** Bookmarklet that runs on fantasy.espn.com. Must stay cheap: no fiber walks, no body.innerText. */
 export function buildBookmarklet(origin: string): string {
   const code = `(function(){
 var O=${JSON.stringify(origin.replace(/\/$/, ""))};
-function takeSize(n){
-  n=Number(n);
-  return (n>=2&&n<=20)?n:0;
-}
-function push(p,out,seen){
-  if(!p||typeof p!=="object")return;
-  var playerId=Number(p.playerId||p.id||0);
-  var overall=Number(p.overallPickNumber||p.overall||p.pickNumber||0);
-  var name=p.playerName||p.fullName||(p.player&&(p.player.fullName||p.player.name))||"";
-  if(!overall)return;
-  if(!playerId&&!name)return;
-  var key=overall+":"+playerId+":"+name;
-  if(seen[key])return;
-  seen[key]=1;
-  out.push({overallPickNumber:overall,playerId:playerId,teamId:Number(p.teamId||p.team||0),playerName:name});
-}
-function walkPicks(root,d,out,seen){
-  if(!root||d>18)return out;
-  if(Array.isArray(root)){
-    if(root.length&&root[0]&&typeof root[0]==="object"&&("playerId"in root[0]||"overallPickNumber"in root[0])){
-      root.forEach(function(p){push(p,out,seen);});
-      return out;
-    }
-    root.slice(0,120).forEach(function(x){walkPicks(x,d+1,out,seen);});
-    return out;
-  }
-  if(typeof root!=="object")return out;
-  if(root.picks&&Array.isArray(root.picks)) root.picks.forEach(function(p){push(p,out,seen);});
-  if(root.draftDetail&&root.draftDetail.picks) root.draftDetail.picks.forEach(function(p){push(p,out,seen);});
-  var keys=Object.keys(root);
-  for(var i=0;i<keys.length;i++){
-    var k=keys[i];
-    if(k.indexOf("__")==0) continue;
-    try{walkPicks(root[k],d+1,out,seen);}catch(e){}
-  }
-  return out;
-}
-function metaWalk(root,d,meta,seen){
-  if(!root||d>12||typeof root!=="object")return;
-  if(seen.has(root))return;
-  seen.add(root);
-  try{
-    var size=takeSize(root.size)||takeSize(root.teamCount)||takeSize(root.numTeams);
-    if(size) meta.teams=size;
-    if(root.settings){
-      size=takeSize(root.settings.size);
-      if(size) meta.teams=size;
-      if(typeof root.settings.name==="string"&&root.settings.name.length>1) meta.leagueName=root.settings.name;
-      var ds=root.settings.draftSettings||root.draftSettings;
-      if(ds){
-        size=takeSize(ds.numTeams)||takeSize(ds.leagueSize);
-        if(size) meta.teams=size;
-        var ot=String(ds.orderType||ds.type||"");
-        if(/LINEAR/i.test(ot)&&!/SNAKE/i.test(ot)) meta.draftType="linear";
-      }
-    }
-    if(Array.isArray(root.teams)&&root.teams.length>=2&&root.teams.length<=20){
-      if(!meta.teams) meta.teams=root.teams.length;
-      if(!meta.teamNames||meta.teamNames.length!==root.teams.length){
-        meta.teamNames=root.teams.map(function(t,i){
-          if(!t||typeof t!=="object") return "Team "+(i+1);
-          var n=((t.location||"")+" "+(t.nickname||"")).trim()||t.name||t.abbrev||("Team "+(i+1));
-          return n;
-        });
-      }
-    }
-    if(Array.isArray(root)){
-      root.slice(0,50).forEach(function(x){metaWalk(x,d+1,meta,seen);});
-      return;
-    }
-    var keys=Object.keys(root);
-    for(var i=0;i<Math.min(keys.length,36);i++){
-      var k=keys[i];
-      if(k.indexOf("__")==0) continue;
-      metaWalk(root[k],d+1,meta,seen);
-    }
-  }catch(e){}
-}
-function eachFiber(fn){
-  var nodes=document.querySelectorAll('[class*="draft"],[id*="draft"],[class*="Draft"],main,#fitt-analytics,#pane-main,body');
-  var max=Math.min(nodes.length,40);
-  for(var i=0;i<max;i++){
-    var el=nodes[i];
-    var ks=Object.keys(el).filter(function(k){return k.indexOf("__reactFiber$")==0||k.indexOf("__reactInternalInstance$")==0;});
-    for(var j=0;j<ks.length;j++){
-      var f=el[ks[j]], depth=0;
-      while(f&&depth<14){
-        fn(f);
-        f=f.return; depth++;
-      }
-    }
-  }
-}
-function pageMeta(){
-  var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null};
+var POLL=6000;
+var API="https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
+function takeSize(n){n=Number(n);return (n>=2&&n<=20)?n:0;}
+function urlMeta(){
+  var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null,slot:0};
   try{
     var sp=new URLSearchParams(location.search);
     meta.leagueId=sp.get("leagueId")||"";
     meta.season=Number(sp.get("seasonId")||0)||0;
     meta.teamId=Number(sp.get("teamId")||0)||0;
   }catch(e){}
-  var seen=new Set();
-  eachFiber(function(f){
-    if(f.memoizedState) metaWalk(f.memoizedState,0,meta,seen);
-    if(f.memoizedProps) metaWalk(f.memoizedProps,0,meta,seen);
-  });
-  try{
-    ["store","__STORE__","__APP_STATE__","espn"].forEach(function(k){
-      if(window[k]) metaWalk(window[k],0,meta,seen);
-    });
-  }catch(e){}
-  if(!meta.teams){
-    var text=document.body.innerText||"";
-    var re=/\\b1\\.(\\d{2})\\b/g,m,max=0;
-    while((m=re.exec(text))) max=Math.max(max,Number(m[1]));
-    meta.teams=takeSize(max);
-  }
-  if(!meta.teams) meta.teams=12;
-  if(meta.teamId>=1&&meta.teamId<=meta.teams) meta.slot=meta.teamId;
   return meta;
 }
-function fromFiber(){
-  var out=[],seen={};
-  eachFiber(function(f){
-    if(f.memoizedState) walkPicks(f.memoizedState,0,out,seen);
-    if(f.memoizedProps) walkPicks(f.memoizedProps,0,out,seen);
-  });
-  try{
-    ["store","__STORE__","__APP_STATE__","espn"].forEach(function(k){
-      if(window[k]) walkPicks(window[k],0,out,seen);
-    });
-  }catch(e){}
+function teamName(t,i){
+  if(!t||typeof t!=="object") return "Team "+(i+1);
+  return ((t.location||"")+" "+(t.nickname||"")).trim()||t.name||t.abbrev||("Team "+(i+1));
+}
+function applyLeague(json,meta){
+  if(!json||typeof json!=="object") return meta;
+  var s=json.settings||{};
+  var size=takeSize(s.size);
+  if(size) meta.teams=size;
+  if(typeof s.name==="string"&&s.name.length>1) meta.leagueName=s.name;
+  var ds=s.draftSettings||{};
+  var ot=String(ds.orderType||ds.type||"");
+  if(/LINEAR/i.test(ot)&&!/SNAKE/i.test(ot)) meta.draftType="linear";
+  else meta.draftType=meta.draftType||"snake";
+  var teams=Array.isArray(json.teams)?json.teams:[];
+  var order=(ds.pickOrder&&ds.pickOrder.length)?ds.pickOrder:teams.map(function(t){return t.id;});
+  if(teams.length>=2&&teams.length<=20){
+    if(!meta.teams) meta.teams=teams.length;
+    var byId={};
+    teams.forEach(function(t){if(t&&t.id!=null) byId[t.id]=t;});
+    meta.teamNames=order.map(function(id,i){return teamName(byId[id],i);});
+  }
+  if(meta.teamId&&order.length){
+    var ix=order.indexOf(meta.teamId);
+    if(ix<0) ix=order.indexOf(Number(meta.teamId));
+    if(ix>=0) meta.slot=ix+1;
+  }
+  if(!meta.slot&&meta.teamId&&meta.teams&&meta.teamId>=1&&meta.teamId<=meta.teams) meta.slot=meta.teamId;
+  if(!meta.teams) meta.teams=12;
+  return meta;
+}
+function takePicks(json){
+  var raw=(json&&json.draftDetail&&json.draftDetail.picks)||(json&&json.picks)||[];
+  if(!Array.isArray(raw)) return [];
+  var out=[],i,p,overall,playerId,name;
+  for(i=0;i<raw.length;i++){
+    p=raw[i];
+    if(!p||typeof p!=="object") continue;
+    overall=Number(p.overallPickNumber||p.overall||0);
+    playerId=Number(p.playerId||0);
+    name=p.playerName||p.fullName||"";
+    if(!overall||(!playerId&&!name)) continue;
+    out.push({overallPickNumber:overall,playerId:playerId,teamId:Number(p.teamId||0),playerName:name});
+  }
+  out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
   return out;
 }
-function fromDom(out,seen,T){
-  var text=document.body.innerText||"";
-  var re=/(?:^|\\n)\\s*(\\d{1,2})\\.(\\d{2})\\s+([A-Z][A-Za-z.'\\- ]{2,40})/g;
-  var m,i=0;
-  while((m=re.exec(text))&&i++<220){
-    var overall=(Number(m[1])-1)*T+Number(m[2]);
-    push({overallPickNumber:overall,playerId:0,teamId:0,playerName:m[3].replace(/\\s+/g," ").trim()},out,seen);
-  }
-  document.querySelectorAll("[data-player-id],[data-playerid]").forEach(function(el){
-    var id=Number(el.getAttribute("data-player-id")||el.getAttribute("data-playerid")||0);
-    var name=(el.textContent||"").trim().split("\\n")[0];
-    if(!id&&!name)return;
-    push({overallPickNumber:out.length+1,playerId:id,teamId:0,playerName:name},out,seen);
-  });
-}
-function collect(T){
-  var seen={},out=fromFiber();
-  fromDom(out,seen,T);
-  var seen2={},uniq=[];
-  out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
-  out.forEach(function(p){
-    if(seen2[p.overallPickNumber]){
-      if(p.playerId&&!seen2[p.overallPickNumber].playerId) seen2[p.overallPickNumber]=p;
-      return;
-    }
-    seen2[p.overallPickNumber]=p;
-  });
-  Object.keys(seen2).forEach(function(k){uniq.push(seen2[k]);});
-  uniq.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
-  return uniq;
+function isLeaguePayload(json){
+  return !!(json&&typeof json==="object"&&(json.draftDetail||(json.settings&&json.teams)||(Array.isArray(json.picks)&&json.picks[0]&&json.picks[0].overallPickNumber)));
 }
 function badge(n,meta,err){
   var b=document.getElementById("draft-room-sync");
@@ -880,27 +779,96 @@ function badge(n,meta,err){
   var label=(meta&&meta.leagueName)?meta.leagueName:(meta&&meta.leagueId)?("League "+meta.leagueId):"this ESPN draft";
   b.textContent=err?("Draft Room · "+err):("Draft Room is syncing "+n+" picks from "+label+". Leave this tab open.");
 }
-function send(picks,meta){
+function idle(fn){
+  if(typeof requestIdleCallback==="function") requestIdleCallback(function(){fn();},{timeout:1500});
+  else setTimeout(fn,0);
+}
+var sending=false,lastSig="",lastMeta=urlMeta();
+function post(picks,meta){
+  lastMeta=meta;
   if(!picks||!picks.length){ badge(0,meta); return; }
-  var payload={picks:picks,href:location.href,title:document.title,ts:Date.now(),meta:meta};
-  var body=JSON.stringify(payload);
-  return fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:body,mode:"cors"}).then(function(r){
+  var sig=picks.length+":"+picks[picks.length-1].overallPickNumber+":"+picks[picks.length-1].playerId+":"+(meta.teams||"")+":"+(meta.leagueId||"");
+  if(sig===lastSig){ badge(picks.length,meta); return; }
+  if(sending) return;
+  sending=true;
+  lastSig=sig;
+  var body=JSON.stringify({picks:picks,href:location.href,title:document.title,ts:Date.now(),meta:meta});
+  fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:body,mode:"cors",keepalive:true}).then(function(r){
+    sending=false;
     if(!r.ok) throw new Error("HTTP "+r.status);
     badge(picks.length,meta);
   }).catch(function(e){
+    sending=false;
+    lastSig="";
     try{navigator.sendBeacon(O+"/api/espn/ingest",new Blob([body],{type:"application/json"}));}catch(e2){}
     badge(picks.length,meta,String(e.message||e));
   });
 }
-function tick(){
-  var meta=pageMeta();
-  send(collect(meta.teams||12),meta);
+function ingestJson(json){
+  if(!isLeaguePayload(json)) return;
+  var meta=applyLeague(json,urlMeta());
+  post(takePicks(json),meta);
 }
-tick();
-if(!window.__draftRoomEspn){
-  window.__draftRoomEspn=setInterval(tick,1500);
+function draftUrl(u){
+  return /mDraftDetail|segments\\/0\\/leagues\\/\\d+/.test(String(u||""));
 }
-badge(0,pageMeta());
+function hookNet(){
+  if(window.__draftRoomEspnHooked) return;
+  window.__draftRoomEspnHooked=1;
+  var ofetch=window.fetch;
+  if(typeof ofetch==="function"){
+    window.fetch=function(){
+      var req=arguments[0];
+      var url=typeof req==="string"?req:(req&&req.url)||"";
+      var p=ofetch.apply(this,arguments);
+      if(draftUrl(url)){
+        p.then(function(res){
+          try{if(res&&res.ok) res.clone().json().then(ingestJson).catch(function(){});}catch(e){}
+          return res;
+        }).catch(function(){});
+      }
+      return p;
+    };
+  }
+  var XO=XMLHttpRequest.prototype.open, XS=XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open=function(m,u){this.__drUrl=u;return XO.apply(this,arguments);};
+  XMLHttpRequest.prototype.send=function(){
+    var xhr=this;
+    xhr.addEventListener("load",function(){
+      try{
+        if(xhr.status>=200&&xhr.status<300&&draftUrl(xhr.__drUrl)&&xhr.responseText&&xhr.responseText.length<2000000){
+          idle(function(){try{ingestJson(JSON.parse(xhr.responseText));}catch(e){}});
+        }
+      }catch(e){}
+    });
+    return XS.apply(this,arguments);
+  };
+}
+function pullApi(){
+  var meta=urlMeta();
+  if(!meta.leagueId){ badge(0,lastMeta||meta); return; }
+  var q="/seasons/"+(meta.season||2026)+"/segments/0/leagues/"+meta.leagueId+"?view=mDraftDetail&view=mSettings&view=mTeam";
+  var ctrl=typeof AbortController==="function"?new AbortController():null;
+  var t=setTimeout(function(){try{ctrl&&ctrl.abort();}catch(e){}},8000);
+  fetch(API+q,{credentials:"include",cache:"no-store",signal:ctrl?ctrl.signal:undefined}).then(function(r){
+    clearTimeout(t);
+    if(!r.ok) throw new Error("ESPN "+r.status);
+    return r.json();
+  }).then(ingestJson).catch(function(){
+    clearTimeout(t);
+    badge((lastSig&&Number(lastSig.split(":")[0]))||0,lastMeta||meta);
+  });
+}
+function kick(){ idle(pullApi); }
+if(window.__draftRoomEspn&&window.__draftRoomEspn.kick){
+  window.__draftRoomEspn.kick();
+  badge(0,lastMeta);
+  return;
+}
+hookNet();
+badge(0,lastMeta);
+window.__draftRoomEspn={kick:kick,timer:setInterval(kick,POLL)};
+kick();
 })();`;
   return `javascript:${code.replace(/\n/g, "")}`;
 }
