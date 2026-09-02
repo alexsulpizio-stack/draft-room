@@ -902,5 +902,5 @@ if(!window.__draftRoomEspn){
 }
 badge(0,pageMeta());
 })();`;
-  return `javascript:${encodeURIComponent(code)}`;
+  return `javascript:${code.replace(/\n/g, "")}`;
 }
