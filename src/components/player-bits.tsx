@@ -30,7 +30,7 @@ export function GapChip({ fp, ds }: { fp: number; ds: number }) {
     return <span className="font-mono text-xs text-muted-foreground">—</span>;
   }
   const gap = fp - ds;
-  if (Math.abs(gap) < 3) {
+  if (fp === ds) {
     return <span className="font-mono text-xs text-muted-foreground">even</span>;
   }
   const dsAhead = gap > 0;
