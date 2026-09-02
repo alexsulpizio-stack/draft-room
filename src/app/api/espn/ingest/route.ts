@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ingestCorsHeaders, mergeIngestMeta, parseEspnPickLog, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
+import { espnPlayerIdOrZero, ingestCorsHeaders, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 
 export const dynamic = "force-dynamic";
@@ -15,12 +15,12 @@ function normalizePicks(raw: unknown): EspnRawPick[] {
       const row = p as Partial<EspnRawPick>;
       return {
         overallPickNumber: Number(row.overallPickNumber ?? 0),
-        playerId: Number(row.playerId ?? 0),
+        playerId: espnPlayerIdOrZero(Number(row.playerId ?? 0)),
         teamId: Number(row.teamId ?? 0),
-        playerName: typeof row.playerName === "string" ? row.playerName : undefined,
+        playerName: typeof row.playerName === "string" && !isPlaceholderEspnName(row.playerName) ? row.playerName : undefined,
       };
     })
-    .filter((p) => p.overallPickNumber > 0 && (p.playerId !== 0 || p.playerName));
+    .filter((p) => p.overallPickNumber > 0 && (isValidEspnPlayerId(p.playerId) || Boolean(p.playerName)));
 }
 
 export async function OPTIONS(req: Request) {

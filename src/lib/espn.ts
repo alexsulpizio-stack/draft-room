@@ -1,6 +1,6 @@
 import { BYE_BY_TEAM } from "./bye-weeks";
 import { pickOwner } from "./draft";
-import { PLAYERS } from "./players";
+import { PLAYER_BY_ID, PLAYERS } from "./players";
 import type { DraftType, LeagueSettings, Player, Position, Scoring } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
@@ -140,6 +140,51 @@ export const PRO_TEAM: Record<number, string> = {
   34: "HOU",
 };
 
+export function isUnknownNflTeam(team: string | undefined | null): boolean {
+  const t = (team ?? "").trim().toUpperCase();
+  return !t || t === "FA" || t === "NONE" || t === "N/A" || t === "--" || t === "0";
+}
+
+export function isSentinelAdp(n: number | undefined | null): boolean {
+  return n == null || !Number.isFinite(n) || n <= 0;
+}
+
+export function isSentinelBye(n: number | undefined | null): boolean {
+  return n == null || !Number.isFinite(n) || n <= 0;
+}
+
+/** Synthetic "ESPN -1" names from unfilled slots — not real players. */
+export function isPlaceholderEspnName(name: string | undefined | null): boolean {
+  if (!name) return true;
+  const m = name.trim().match(/^ESPN\s+(-?\d+)$/i);
+  if (!m) return false;
+  return Number(m[1]) <= 0;
+}
+
+/** Prefer live ESPN team/bye/ADP only when they are real; otherwise keep the snapshot. */
+export function mergeLiveEspnFields(
+  snapshot: { team?: string; bye?: number; adp?: number } | undefined,
+  live: { team?: string; bye?: number; adp?: number },
+): { team: string; bye: number; adp: number } {
+  const team = !isUnknownNflTeam(live.team)
+    ? live.team!.trim()
+    : !isUnknownNflTeam(snapshot?.team)
+      ? snapshot!.team!.trim()
+      : ((live.team || snapshot?.team || "FA").trim() || "FA");
+  const byeFromTeam = BYE_BY_TEAM[team] ?? 0;
+  const bye = !isSentinelBye(live.bye)
+    ? live.bye!
+    : !isSentinelBye(snapshot?.bye)
+      ? snapshot!.bye!
+      : byeFromTeam;
+  const adp = !isSentinelAdp(live.adp)
+    ? live.adp!
+    : !isSentinelAdp(snapshot?.adp)
+      ? snapshot!.adp!
+      : 999;
+  return { team, bye, adp };
+}
+
 const POS_BY_ID: Record<number, Position> = {
   1: "QB",
   2: "RB",
@@ -174,6 +219,7 @@ export type MappedEspnPick = {
   name: string;
   pos: Position;
   nflTeam: string;
+  adp?: number;
 };
 
 export type EspnPlayerMeta = {
@@ -182,6 +228,7 @@ export type EspnPlayerMeta = {
   pos: Position;
   team: string;
   ourId: string | null;
+  adp?: number;
 };
 
 export type EspnLeagueInfo = {
@@ -233,6 +280,24 @@ export function normalizeCookies(swid?: string, espnS2?: string): string | undef
 
 export function espnPos(id?: number): Position {
   return POS_BY_ID[id ?? -1] ?? "WR";
+}
+
+/** ESPN uses 0 / -1 for empty or unresolved draft slots — not a real player. */
+export function isValidEspnPlayerId(id: number | undefined | null): id is number {
+  return typeof id === "number" && Number.isFinite(id) && id > 0;
+}
+
+export function espnPlayerIdOrZero(id: number | undefined | null): number {
+  return isValidEspnPlayerId(id) ? id : 0;
+}
+
+/** Stable unmatched id: never `espn--1` / `espn-0` when many players lack an ESPN id. */
+export function unmatchedEspnId(name: string, overall?: number, espnId?: number): string {
+  if (isValidEspnPlayerId(espnId)) return `espn-${espnId}`;
+  const slug = normalizePlayerName(name).replace(/\s+/g, "-");
+  if (slug && !/^espn-?-?\d+$/i.test(slug)) return `espn-${slug}`;
+  if (overall && overall > 0) return `espn-pick-${overall}`;
+  return `espn-${slug || "unknown"}`;
 }
 
 export function normalizePlayerName(s: string) {
@@ -318,16 +383,35 @@ export function stubFromEspn(meta: {
   name: string;
   pos: Position;
   team: string;
+  id?: string;
+  overall?: number;
+  adp?: number;
 }): Player {
-  return {
-    id: `espn-${meta.espnId}`,
-    name: meta.name.replace(/\s+D\/ST$/i, ""),
+  const name = meta.name.replace(/\s+D\/ST$/i, "");
+  const named = isPlaceholderEspnName(name) ? undefined : matchByName(name);
+  const live = mergeLiveEspnFields(named, {
     team: meta.team,
-    pos: meta.pos,
     bye: BYE_BY_TEAM[meta.team] ?? 0,
+    adp: meta.adp,
+  });
+  if (named) {
+    return {
+      ...named,
+      team: live.team,
+      bye: live.bye,
+      adp: live.adp,
+    };
+  }
+  const espnId = espnPlayerIdOrZero(meta.espnId);
+  return {
+    id: meta.id || unmatchedEspnId(name, meta.overall, espnId),
+    name: name || "Unknown player",
+    team: live.team,
+    pos: meta.pos,
+    bye: live.bye,
     fpRank: 999,
     dsRank: 999,
-    adp: 400,
+    adp: live.adp,
     proj: 0,
     tags: ["espn"],
     note: "On ESPN's board but not in this snapshot — still tracked as taken.",
@@ -458,7 +542,7 @@ export function parseEspnLeague(
     return t?.name ?? `Team ${i + 1}`;
   });
 
-  const apiPicks = (payload.draftDetail?.picks ?? []).filter((p) => p.playerId && p.playerId !== 0);
+  const apiPicks = (payload.draftDetail?.picks ?? []).filter((p) => isValidEspnPlayerId(p.playerId));
 
   return {
     leagueId: args.leagueId,
@@ -491,7 +575,7 @@ export function parseEspnLeague(
 export function rawPicksFromDetail(payload: EspnLeaguePayload): EspnRawPick[] {
   const picks = payload.draftDetail?.picks ?? [];
   return picks
-    .filter((p) => p.playerId != null && p.playerId !== 0)
+    .filter((p) => isValidEspnPlayerId(p.playerId))
     .map((p) => ({
       overallPickNumber: Number(p.overallPickNumber ?? 0),
       playerId: Number(p.playerId),
@@ -505,22 +589,23 @@ export function rawPicksFromDetail(payload: EspnLeaguePayload): EspnRawPick[] {
 export function mergeEspnPicks(api: EspnRawPick[], ingest: EspnRawPick[]): EspnRawPick[] {
   const byOverall = new Map<number, EspnRawPick>();
   for (const p of [...api, ...ingest]) {
-    if (!p.playerId && !p.playerName) continue;
-    if (p.playerId === 0 && !p.playerName) continue;
+    const playerId = espnPlayerIdOrZero(p.playerId);
+    if (!playerId && (!p.playerName || isPlaceholderEspnName(p.playerName))) continue;
     const overall = Number(p.overallPickNumber);
     if (!overall) continue;
+    const next: EspnRawPick = { ...p, overallPickNumber: overall, playerId };
     const prev = byOverall.get(overall);
     if (!prev) {
-      byOverall.set(overall, { ...p, overallPickNumber: overall });
+      byOverall.set(overall, next);
       continue;
     }
     byOverall.set(overall, {
       ...prev,
-      ...p,
+      ...next,
       overallPickNumber: overall,
-      playerId: p.playerId || prev.playerId,
-      teamId: p.teamId || prev.teamId,
-      playerName: p.playerName || prev.playerName,
+      playerId: playerId || prev.playerId,
+      teamId: next.teamId || prev.teamId,
+      playerName: next.playerName || prev.playerName,
     });
   }
   return [...byOverall.values()].sort((a, b) => a.overallPickNumber - b.overallPickNumber);
@@ -534,50 +619,111 @@ export function mapEspnPicks(args: {
   draftType?: DraftType;
 }): MappedEspnPick[] {
   const { picks, pickOrder, teamsCount, players, draftType = "snake" } = args;
-  return picks.map((p) => {
-    const meta = p.playerId ? players.get(p.playerId) : undefined;
-    const name = p.playerName || meta?.name || `ESPN ${p.playerId}`;
-    const pos = meta?.pos ?? "WR";
-    const nflTeam = meta?.team ?? "FA";
-    let ourId = meta?.ourId ?? matchOurPlayer(name, pos, nflTeam);
-    if (!ourId) ourId = `espn-${p.playerId || normalizePlayerName(name).replace(/\s+/g, "-")}`;
-    const orderIdx = p.teamId ? pickOrder.indexOf(p.teamId) : -1;
-    const team =
-      orderIdx >= 0
-        ? orderIdx + 1
-        : p.teamId >= 1 && p.teamId <= teamsCount
-          ? p.teamId
-          : pickOwner(p.overallPickNumber, teamsCount, draftType);
-    return {
-      overall: p.overallPickNumber,
-      team,
-      playerId: ourId,
-      espnPlayerId: p.playerId,
-      espnTeamId: p.teamId,
-      name,
-      pos,
-      nflTeam,
-    };
-  });
+  const usedIds = new Set<string>();
+  return picks
+    .filter(
+      (p) =>
+        isValidEspnPlayerId(p.playerId) ||
+        (Boolean(p.playerName) && !isPlaceholderEspnName(p.playerName)),
+    )
+    .map((p) => {
+      const espnId = espnPlayerIdOrZero(p.playerId);
+      const meta = espnId ? players.get(espnId) : undefined;
+      const rawName = p.playerName && !isPlaceholderEspnName(p.playerName) ? p.playerName : undefined;
+      const name = rawName || meta?.name || (espnId ? `Player ${espnId}` : "");
+      const snapshot =
+        (name ? matchByName(name) : undefined) ??
+        (meta?.ourId ? PLAYER_BY_ID.get(meta.ourId) : undefined);
+      const pos = meta?.pos ?? snapshot?.pos ?? "WR";
+      const live = mergeLiveEspnFields(snapshot, {
+        team: meta?.team,
+        bye: snapshot?.bye ?? (meta?.team ? BYE_BY_TEAM[meta.team] ?? 0 : 0),
+        adp: meta?.adp ?? snapshot?.adp,
+      });
+      let ourId = meta?.ourId ?? (name ? matchOurPlayer(name, pos, live.team) : null) ?? snapshot?.id ?? null;
+      if (!ourId) ourId = unmatchedEspnId(name, p.overallPickNumber, espnId);
+      if (usedIds.has(ourId)) ourId = unmatchedEspnId(name, p.overallPickNumber) + `-p${p.overallPickNumber}`;
+      usedIds.add(ourId);
+      const orderIdx = p.teamId ? pickOrder.indexOf(p.teamId) : -1;
+      const team =
+        orderIdx >= 0
+          ? orderIdx + 1
+          : p.teamId >= 1 && p.teamId <= teamsCount
+            ? p.teamId
+            : pickOwner(p.overallPickNumber, teamsCount, draftType);
+      return {
+        overall: p.overallPickNumber,
+        team,
+        playerId: ourId,
+        espnPlayerId: espnId,
+        espnTeamId: p.teamId,
+        name: name || snapshot?.name || `Player ${espnId || p.overallPickNumber}`,
+        pos,
+        nflTeam: live.team,
+        adp: live.adp,
+      };
+    });
 }
 
 export function extrasFromMapped(mapped: MappedEspnPick[]): Player[] {
   const extras: Player[] = [];
   const seen = new Set<string>();
   for (const p of mapped) {
-    if (!p.playerId.startsWith("espn-")) continue;
     if (seen.has(p.playerId)) continue;
     seen.add(p.playerId);
-    extras.push(
-      stubFromEspn({
-        espnId: p.espnPlayerId || 0,
-        name: p.name,
-        pos: p.pos,
-        team: p.nflTeam,
-      })
-    );
+    if (p.playerId.startsWith("espn-")) {
+      if (isPlaceholderEspnName(p.name) && !isValidEspnPlayerId(p.espnPlayerId)) continue;
+      extras.push(
+        stubFromEspn({
+          id: p.playerId,
+          espnId: espnPlayerIdOrZero(p.espnPlayerId),
+          name: p.name,
+          pos: p.pos,
+          team: p.nflTeam,
+          overall: p.overall,
+          adp: p.adp,
+        }),
+      );
+      continue;
+    }
+    const snap = PLAYER_BY_ID.get(p.playerId);
+    if (!snap) continue;
+    const live = mergeLiveEspnFields(snap, {
+      team: p.nflTeam,
+      bye: BYE_BY_TEAM[p.nflTeam] ?? 0,
+      adp: p.adp,
+    });
+    if (live.team === snap.team && live.bye === snap.bye && live.adp === snap.adp) continue;
+    extras.push({ ...snap, team: live.team, bye: live.bye, adp: live.adp });
   }
   return extras;
+}
+
+/** Overlay ESPN extras onto the snapshot board without writing sentinel team/bye/ADP. */
+export function mergeBoardWithEspnExtras(base: Player[], extras: Player[]): Player[] {
+  if (!extras.length) return base;
+  const byId = new Map(base.map((p) => [p.id, p]));
+  const appended: Player[] = [];
+  for (const e of extras) {
+    const prev = byId.get(e.id);
+    if (prev) {
+      const live = mergeLiveEspnFields(prev, { team: e.team, bye: e.bye, adp: e.adp });
+      if (live.team !== prev.team || live.bye !== prev.bye || live.adp !== prev.adp) {
+        byId.set(e.id, { ...prev, team: live.team, bye: live.bye, adp: live.adp });
+      }
+      continue;
+    }
+    if (isPlaceholderEspnName(e.name) && e.tags.includes("espn")) continue;
+    const named = e.name ? matchByName(e.name) : undefined;
+    if (named && byId.has(named.id)) {
+      const snap = byId.get(named.id)!;
+      const live = mergeLiveEspnFields(snap, { team: e.team, bye: e.bye, adp: e.adp });
+      byId.set(named.id, { ...snap, team: live.team, bye: live.bye, adp: live.adp });
+      continue;
+    }
+    appended.push(e);
+  }
+  return [...byId.values(), ...appended];
 }
 
 let playerCache: { season: number; byId: Map<number, EspnPlayerMeta> } | null = null;
@@ -602,18 +748,28 @@ export async function loadEspnPlayers(
     fullName?: string;
     defaultPositionId?: number;
     proTeamId?: number;
+    ownership?: { averageDraftPosition?: number };
+    draftRanksByRankType?: Record<string, { rank?: number }>;
   }>;
   const byId = new Map<number, EspnPlayerMeta>();
   for (const p of list) {
     const pos = espnPos(p.defaultPositionId);
-    const team = PRO_TEAM[p.proTeamId ?? 0] ?? "FA";
+    const team =
+      p.proTeamId == null ? "" : (PRO_TEAM[p.proTeamId] ?? "");
     const name = p.fullName ?? `Player ${p.id}`;
+    const adpRaw =
+      p.ownership?.averageDraftPosition ??
+      p.draftRanksByRankType?.STANDARD?.rank ??
+      p.draftRanksByRankType?.PPR?.rank;
+    const adp = Number(adpRaw);
+    const teamOrFa = team || "FA";
     byId.set(p.id, {
       id: p.id,
       name,
       pos,
-      team,
-      ourId: matchOurPlayer(name, pos, team),
+      team: teamOrFa,
+      ourId: matchOurPlayer(name, pos, teamOrFa),
+      adp: adp > 0 ? adp : undefined,
     });
   }
   playerCache = { season, byId };
@@ -757,7 +913,9 @@ function takePicks(json){
     if(!p||typeof p!=="object") continue;
     overall=Number(p.overallPickNumber||p.overall||0);
     playerId=Number(p.playerId||0);
+    if(!(playerId>0)) playerId=0;
     name=p.playerName||p.fullName||"";
+    if(/^ESPN\s+-?\d+$/i.test(name)&&!(playerId>0)) name="";
     if(!overall||(!playerId&&!name)) continue;
     out.push({overallPickNumber:overall,playerId:playerId,teamId:Number(p.teamId||0),playerName:name});
   }

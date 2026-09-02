@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { isMissingRank } from "@/lib/draft";
+import { playerSublineText } from "@/lib/player-display";
 import type { Injury, Player, Position } from "@/lib/types";
 
 export const POS_CLASS: Record<Position, string> = {
@@ -61,14 +62,40 @@ export function InjuryDot({ injury }: { injury?: Injury }) {
   );
 }
 
+export function formatNflTeam(team: string | undefined): string {
+  return isUnknownNflTeam(team) ? "—" : (team as string).trim();
+}
+
+/** ESPN ADP · team · bye — never "ESPN -1" or "bye 0". */
+export function playerSublineText(player: Player): string {
+  const adp = formatSourceRank(player.adp);
+  const team = formatNflTeam(player.team);
+  const head = team === "—" ? `ESPN ${adp}` : `ESPN ${adp} ${team}`;
+  return player.bye > 0 ? `${head} · bye ${player.bye}` : head;
+}
+
+export function PlayerSubline({
+  player,
+  sleeper,
+  className,
+}: {
+  player: Player;
+  sleeper?: boolean;
+  className?: string;
+}) {
+  return (
+    <span className={cn("text-[11px] text-muted-foreground", className)}>
+      {playerSublineText(player)}
+      {sleeper ? " · sleeper" : ""}
+    </span>
+  );
+}
+
 export function PlayerName({ player }: { player: Player }) {
   return (
     <span className="flex min-w-0 flex-col">
       <span className="truncate font-medium leading-tight">{player.name}</span>
-      <span className="text-[11px] text-muted-foreground">
-        {player.team}
-        {player.bye ? ` · Bye ${player.bye}` : ""}
-      </span>
+      <PlayerSubline player={player} />
     </span>
   );
 }

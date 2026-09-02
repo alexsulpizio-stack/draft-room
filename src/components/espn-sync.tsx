@@ -420,10 +420,12 @@ export function EspnSync({
       if (!ours && p.playerName) {
         extras.push(
           stubFromEspn({
-            espnId: p.overallPickNumber,
+            id: playerId,
+            espnId: 0,
             name: p.playerName,
             pos: "WR",
             team: "FA",
+            overall: p.overallPickNumber,
           }),
         );
       }

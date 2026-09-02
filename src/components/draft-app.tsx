@@ -61,8 +61,9 @@ import {
 } from "@/lib/rank-refresh";
 import type { DraftPick, DraftType, Injury, LeagueSettings, Player, Position } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
-import { GapChip, InjuryDot, PosBadge } from "@/components/player-bits";
+import { GapChip, InjuryDot, PlayerSubline, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
+import { mergeBoardWithEspnExtras } from "@/lib/espn";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
 
@@ -161,6 +162,12 @@ function writeStore(next: Persisted) {
   window.dispatchEvent(new Event("draft-room"));
 }
 
+/** Snapshot `player.id` is unique. ESPN stubs used to share `espn--1` when espnId was missing. */
+function playerListKey(player: Player, index?: number) {
+  if (!/^espn-(0|-\d+)$/.test(player.id)) return player.id;
+  return [player.id, player.name, player.team, player.pos, index ?? ""].join(":");
+}
+
 function posFilterList(settings: LeagueSettings): Array<Position | "ALL"> {
   const list: Array<Position | "ALL"> = ["ALL", "QB", "RB", "WR", "TE"];
   if (settings.roster.k > 0) list.push("K");
@@ -248,9 +255,7 @@ export function DraftApp() {
       rankOverlay?.injuriesComplete,
     );
     const base = overrides ?? ranked;
-    if (!extras.length) return base;
-    const ids = new Set(base.map((p) => p.id));
-    return [...base, ...extras.filter((e) => !ids.has(e.id))];
+    return mergeBoardWithEspnExtras(base, extras);
   }, [overrides, extras, rankOverlay]);
   const byId = useMemo(() => new Map(board.map((p) => [p.id, p])), [board]);
   const overall = picks.length + 1;
@@ -639,7 +644,7 @@ export function DraftApp() {
                   const starred = stars.includes(p.id);
                   return (
                     <tr
-                      key={p.id}
+                      key={playerListKey(p)}
                       className={cn(
                         "border-t border-border hover:bg-muted/70",
                         gone && "opacity-40",
@@ -661,9 +666,8 @@ export function DraftApp() {
                               </span>
                               <InjuryDot injury={p.injury} />
                             </div>
-                            <p className="text-[11px] text-muted-foreground">
-                              {p.team} · Bye {p.bye || "—"}
-                              {p.tags.includes("sleeper") ? " · sleeper" : ""}
+                            <p>
+                              <PlayerSubline player={p} sleeper={p.tags.includes("sleeper")} />
                             </p>
                           </div>
                         </div>
@@ -716,7 +720,7 @@ export function DraftApp() {
               <ol className="space-y-2">
                 {recs.map((rec, idx) => (
                   <li
-                    key={rec.player.id}
+                    key={playerListKey(rec.player, idx)}
                     className="rounded-xl border border-border bg-muted/40 p-3"
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -730,8 +734,8 @@ export function DraftApp() {
                             <WaitChip wait={rec.wait} />
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {rec.player.team} · FP {rec.player.fpRank} · DS {rec.player.dsRank} · ADP{" "}
-                            {rec.player.adp.toFixed(0)}
+                            <PlayerSubline player={rec.player} className="text-xs" />
+                            {" · "}FP {formatSourceRank(rec.player.fpRank)} · DS {formatSourceRank(rec.player.dsRank)}
                           </p>
                           <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                             {rec.reasons.map((r) => (
@@ -879,14 +883,12 @@ function RosterCard({
                   <p className="text-xs text-muted-foreground">Empty</p>
                 ) : (
                   <ul className="space-y-1">
-                    {here.map((p) => (
-                      <li key={p.id} className="flex items-center justify-between text-sm">
+                    {here.map((p, i) => (
+                      <li key={playerListKey(p, i)} className="flex items-center justify-between text-sm">
                         <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="truncate">
+                          <span className="min-w-0 truncate">
                             {p.name}{" "}
-                            <span className="text-xs text-muted-foreground">
-                              {p.team} · bye {p.bye}
-                            </span>
+                            <PlayerSubline player={p} className="text-xs" />
                           </span>
                           <InjuryDot injury={p.injury} />
                         </span>
@@ -976,8 +978,8 @@ function GapsList({
         Where your two sources disagree. DS+ means DraftSharks is higher — often the value if he lasts. FP+ means FantasyPros is higher.
       </p>
       <ul className="space-y-2">
-        {gaps.map(({ player }) => (
-          <li key={player.id} className="flex items-center justify-between gap-2 text-sm">
+        {gaps.map(({ player }, i) => (
+          <li key={playerListKey(player, i)} className="flex items-center justify-between gap-2 text-sm">
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="truncate font-medium">{player.name}</span>
@@ -985,7 +987,8 @@ function GapsList({
                 <InjuryDot injury={player.injury} />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                FP {player.fpRank} · DS {player.dsRank} · ADP {player.adp.toFixed(0)}
+                FP {formatSourceRank(player.fpRank)} · DS {formatSourceRank(player.dsRank)} · ADP{" "}
+                {formatSourceRank(player.adp)}
               </p>
             </div>
             <div className="flex items-center gap-2">
