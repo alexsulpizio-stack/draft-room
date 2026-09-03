@@ -1,5 +1,4 @@
-import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { EspnIngestMeta, EspnRawPick } from "./espn";
 import { setIngest, getIngest } from "./espn-ingest";
@@ -10,18 +9,8 @@ const TOPIC_PATHS = [
 ] as const;
 
 export const NTFY_HOST = "https://ntfy.sh";
-
-function readTopic(): string | null {
-  for (const file of TOPIC_PATHS) {
-    try {
-      const t = readFileSync(file, "utf8").trim();
-      if (/^dr[a-z0-9]{12,20}$/.test(t)) return t;
-    } catch {
-      /* next */
-    }
-  }
-  return null;
-}
+/** Fixed so the bookmarklet is valid on first paint — never javascript:void(0). */
+export const STABLE_RELAY_TOPIC = "drjfl28jackal";
 
 function writeTopic(topic: string) {
   for (const file of TOPIC_PATHS) {
@@ -35,18 +24,12 @@ function writeTopic(topic: string) {
 }
 
 export function getRelayTopic(): string {
-  const existing = readTopic();
-  if (existing) return existing;
-  const topic = `dr${randomBytes(8).toString("hex")}`;
-  writeTopic(topic);
-  return topic;
+  writeTopic(STABLE_RELAY_TOPIC);
+  return STABLE_RELAY_TOPIC;
 }
 
-/** Drop a polluted topic (test posts) so listen cannot revive fake picks. */
 export function rotateRelayTopic(): string {
-  const topic = `dr${randomBytes(8).toString("hex")}`;
-  writeTopic(topic);
-  return topic;
+  return getRelayTopic();
 }
 
 export function relayUrl(topic = getRelayTopic()): string {

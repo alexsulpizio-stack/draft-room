@@ -8,7 +8,7 @@ import {
   requestPublicOrigin,
 } from "@/lib/espn";
 import { clearIngest, getIngest } from "@/lib/espn-ingest";
-import { getRelayTopic, pullRelayIntoIngest, relayUrl, rotateRelayTopic } from "@/lib/espn-relay";
+import { getRelayTopic, pullRelayIntoIngest, relayUrl } from "@/lib/espn-relay";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,7 +23,6 @@ export async function GET(req: Request) {
   const href = last?.href ?? "";
   if (last?.picks.length && href !== "paste" && !/espn\.com/i.test(href)) {
     clearIngest();
-    rotateRelayTopic();
     last = null;
   }
   const publicOrigin = requestPublicOrigin(req);

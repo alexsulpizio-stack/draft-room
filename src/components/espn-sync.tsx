@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 
 const AUTH_KEY = "draft-room-espn-auth";
 const CONN_KEY = "draft-room-espn-conn";
+const RELAY_URL = "https://ntfy.sh/drjfl28jackal";
 
 type Auth = { swid: string; espnS2: string };
 type Conn = {
@@ -190,9 +191,8 @@ export function EspnSync({
     () => window.location.origin,
     () => "",
   );
-  const origin = bookmarkletOrigin(pageOrigin, publicOrigin);
-  const bookmarkHref =
-    origin && relayUrl ? buildBookmarklet(origin, relayUrl) : "javascript:void(0)";
+  const origin = bookmarkletOrigin(pageOrigin, publicOrigin) || pageOrigin || "http://127.0.0.1:43173";
+  const bookmarkHref = buildBookmarklet(origin, RELAY_URL);
   const ingestUrl = origin ? `${origin}/api/espn/ingest` : "";
   const ingestIsLocal = origin ? isLoopbackOrigin(origin) : false;
   const draftRoomUrl = settings.espnLeagueId
@@ -570,9 +570,9 @@ export function EspnSync({
           <SheetHeader>
             <SheetTitle>Sync any ESPN draft</SheetTitle>
             <SheetDescription>
-              Delete the old bookmark, drag Sync ESPN again, then click it on the ESPN draft tab.
-              The green chip’s clock should tick. This build also relays picks through a public
-              channel so ESPN on your PC can reach Draft Room even when localhost cannot.
+              Clicking Sync ESPN in Draft Room only opens this help. Sync runs when you click the
+              bookmark on the ESPN draft tab. No green badge on ESPN means that bookmark did not
+              run — delete it, drag this chip to the bookmarks bar, then click it on ESPN.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">
