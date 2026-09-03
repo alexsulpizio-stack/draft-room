@@ -1438,6 +1438,24 @@ function takePicks(json){
   }
   return out;
 }
+function takeDomPicks(){
+  var out=[], seen={}, i, a, href, id, name, m;
+  var links=document.querySelectorAll('a[href*="/player/_/id/"], a[href*="playerId="]');
+  for(i=0;i<links.length&&out.length<80;i++){
+    a=links[i];
+    href=a.getAttribute("href")||"";
+    m=href.match(/\/player\/_\/id\/(\d+)/)||href.match(/[?&]playerId=(\d+)/);
+    id=m?Number(m[1]):0;
+    name=(a.textContent||"").replace(/\s+/g," ").trim();
+    if(/^ESPN\s+-?\d+$/i.test(name)) name="";
+    if(!(id>0)&&name.length<3) continue;
+    var key=id?("id:"+id):("n:"+name.toLowerCase());
+    if(seen[key]) continue;
+    seen[key]=1;
+    out.push({overallPickNumber:out.length+1,playerId:id,teamId:0,playerName:name});
+  }
+  return out;
+}
 function isLeaguePayload(json){
   json=unwrap(json);
   return !!(json&&typeof json==="object"&&(json.draftDetail||json.draft||(json.settings&&json.teams)||(Array.isArray(json.picks)&&json.picks[0]&&(json.picks[0].overallPickNumber||json.picks[0].player||json.picks[0].playerId))));
@@ -1534,6 +1552,7 @@ function ingestJson(json){
   if(!json||typeof json!=="object") return;
   if(json.draftPick&&typeof json.draftPick==="object") json={picks:[json.draftPick]};
   var got=takePicks(json);
+  if(!got.length) got=takeDomPicks();
   if(!got.length&&!isLeaguePayload(json)) return;
   var meta=applyLeague(json,lastMeta||urlMeta());
   post(got,meta);
@@ -1615,6 +1634,8 @@ function pullApi(){
     if(i>=urls.length){
       var n=(lastSig&&lastSig.charAt(0)!=="0"&&Number(lastSig.split(":")[0]))||0;
       if(n){ badge(n,lastMeta||meta); return; }
+      var dom=takeDomPicks();
+      if(dom.length){ post(dom,lastMeta||meta); return; }
       post([],lastMeta||meta,lastErr||"0 filled slots");
       return;
     }
