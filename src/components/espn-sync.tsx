@@ -184,6 +184,7 @@ export function EspnSync({
   const [publicOriginDraft, setPublicOriginDraft] = useState("");
   const [relayUrl, setRelayUrl] = useState("");
   const [loopbackHostMismatch, setLoopbackHostMismatch] = useState(false);
+  const [serverBookmarklet, setServerBookmarklet] = useState("");
 
   const connRaw = useSyncExternalStore(subscribeConn, getConnSnap, () => "");
   const conn = useMemo(() => {
@@ -230,7 +231,7 @@ export function EspnSync({
     resolveEspnBookmarkOrigin(pageOrigin, reachablePublic || publicOrigin) ||
     pageOrigin ||
     "http://127.0.0.1:43173";
-  const bookmarkHref = buildBookmarklet(origin, ESPN_RELAY_URL);
+  const bookmarkHref = serverBookmarklet || buildBookmarklet(origin, ESPN_RELAY_URL);
   const ingestUrl = origin ? `${origin}/api/espn/ingest` : "";
   const ingestIsLocal = origin ? isLoopbackOrigin(origin) : false;
   const pageIsLocal = pageOrigin ? isLoopbackOrigin(pageOrigin) : false;
@@ -430,6 +431,7 @@ export function EspnSync({
         connected?: boolean;
         cleared?: boolean;
         loopbackHostMismatch?: boolean;
+        bookmarklet?: string;
       };
       if (typeof json.publicOrigin === "string" && json.publicOrigin) {
         setPublicOrigin(json.publicOrigin);
@@ -439,6 +441,9 @@ export function EspnSync({
       }
       if (typeof json.loopbackHostMismatch === "boolean") {
         setLoopbackHostMismatch(json.loopbackHostMismatch);
+      }
+      if (typeof json.bookmarklet === "string" && json.bookmarklet.startsWith("javascript:")) {
+        setServerBookmarklet(json.bookmarklet);
       }
       if (!json.ingest || !json.picks?.length) {
         if (json.cleared) {
@@ -583,6 +588,7 @@ export function EspnSync({
             publicOrigin?: string;
             relayUrl?: string;
             loopbackHostMismatch?: boolean;
+            bookmarklet?: string;
           }>,
       )
       .then((json) => {
@@ -594,6 +600,9 @@ export function EspnSync({
         }
         if (typeof json.loopbackHostMismatch === "boolean") {
           setLoopbackHostMismatch(json.loopbackHostMismatch);
+        }
+        if (typeof json.bookmarklet === "string" && json.bookmarklet.startsWith("javascript:")) {
+          setServerBookmarklet(json.bookmarklet);
         }
       })
       .catch(() => {
@@ -704,12 +713,14 @@ export function EspnSync({
           <SheetHeader>
             <SheetTitle>Sync any ESPN draft</SheetTitle>
             <SheetDescription>
-              The Sync ESPN chip in Draft Room only opens this help — it does not read ESPN. Sync
-              starts when you click the <span className="font-medium text-foreground">Sync ESPN</span>{" "}
-              bookmark on the ESPN draft tab (not FantasyPros / DraftSharks — use Sync FP/DS ranks
-              there). No green badge on ESPN means that bookmark did not
-              run — delete the old one, copy the script below, save it as the bookmark URL, then
-              click it on fantasy.espn.com.
+              This chip only opens help. It does not start sync and will never show a green badge
+              here. Sync starts only when you click the{" "}
+              <span className="font-medium text-foreground">Sync ESPN bookmark</span> on the ESPN
+              draft tab (fantasy.espn.com — not FantasyPros / DraftSharks). No green badge on ESPN
+              means that bookmark did not run: old URL was often{" "}
+              <span className="font-mono">#</span> (React stripped javascript:) or the script was
+              too long for Chrome. Delete the old bookmark, copy the shorter script below, paste it
+              as the bookmark URL, then click it on fantasy.espn.com.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">
@@ -749,8 +760,8 @@ export function EspnSync({
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                   Chrome often saves a drag as <span className="font-mono">#</span>, which does
-                  nothing on ESPN (no green badge). Copy the script, then add a bookmark whose URL
-                  is the paste. Or drag after this page has fully loaded.
+                  nothing on ESPN (no green badge). The new script is short enough for Chrome to
+                  save. Copy it, then add a bookmark whose URL is the paste.
                 </p>
                 <BookmarkletAnchor
                   bookmarklet={bookmarkHref}

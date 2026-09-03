@@ -6,6 +6,7 @@ import {
 import { commitRankScrape } from "../src/lib/ranks-apply";
 import { clearRanksIngest, getRanksIngest } from "../src/lib/ranks-ingest";
 import { RANKS_RELAY_URL } from "../src/lib/relay-urls";
+import { isLeftoverAgentRankSnapshot } from "../src/lib/leftover-tests";
 import { parseRankingPaste } from "../src/lib/parse-import";
 
 assert.equal(RANKS_RELAY_URL, "https://ntfy.sh/drjfl28jackal-ranks");
@@ -132,6 +133,32 @@ const ds = commitRankScrape({
 });
 assert.equal(ds.applied, true);
 assert.ok(getRanksIngest().ds);
+
+assert.equal(
+  isLeftoverAgentRankSnapshot({ matched: 8, ts: 1788461934456, rows }),
+  true,
+  "known leftover FP test snapshot",
+);
+assert.equal(
+  isLeftoverAgentRankSnapshot({ matched: 8, ts: 9001, rows }),
+  false,
+  "same 8 names with a live ts are not leftover",
+);
+assert.equal(
+  selectBestRankSnapshots([
+    JSON.stringify({
+      v: 2,
+      s: "fp",
+      t: 1788461934456,
+      h: "https://draftwizard.fantasypros.com/football/mock-draft-simulator/",
+      i: 0,
+      n: 1,
+      r: rows.map((r) => [r.rank, r.name, r.pos, r.team]),
+    }),
+  ]).fp,
+  undefined,
+  "leftover agent ranks must not apply",
+);
 
 clearRanksIngest();
 console.log("check-ranks-relay: ok");

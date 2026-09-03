@@ -18,6 +18,7 @@ import {
   stubFromEspn,
 } from "../src/lib/espn";
 import { clearIngest, getIngest, INGEST_PATHS, setIngest } from "../src/lib/espn-ingest";
+import { buildCompressedEspnBookmarklet } from "../src/lib/bookmarklet-compress";
 import { playerSublineText } from "../src/lib/player-display";
 import { PLAYERS } from "../src/lib/players";
 import type { Player } from "../src/lib/types";
@@ -397,12 +398,19 @@ assert(bm.includes("^ESPN\\s+-?\\d+$"), "bookmarklet keeps ESPN placeholder rege
 assert(bm.includes("(\\d{1,2})\\.(\\d{1,2})\\b"), "bookmarklet keeps pick-number regex");
 assert(!bm.includes("/^ESPNs+-?d+$"), "bookmarklet must not cook \\\\s/\\\\d away");
 assert(!bm.includes(".replace(/s+/g"), "bookmarklet must not collapse the letter s");
-assert(bm.includes("takeReactPicks") && bm.includes("takeBoardPicks") && bm.includes("readText"), "scrape fallbacks present");
+assert(bm.includes('badge(0,"starting")'), "badge paints before scrape/post");
+assert(bm.includes("sending"), "badge updates before relay POST");
 assert(
   bm.includes('host==="espn.com"') || bm.includes('host==="espn.com"||'),
   "bookmarklet refuses non-ESPN hosts",
 );
 assert(bm.includes("Sync FP ranks") || bm.includes("Sync DS ranks"), "bookmarklet points users at FP/DS bookmarks");
+const espnPacked = buildCompressedEspnBookmarklet("http://127.0.0.1:43173", "https://ntfy.sh/drjfl28jackal");
+assert(espnPacked.startsWith("javascript:"), "compressed bookmarklet protocol");
+assert(espnPacked.length < 9000, `compressed ESPN bookmarklet must fit Chrome, got ${espnPacked.length}`);
+assert(espnPacked.includes("DecompressionStream"), "loader gunzips scrape after badge");
+assert(espnPacked.includes('badge(0,"starting")'), "compressed loader badges first");
+assert(!espnPacked.includes("\n"), "compressed bookmarklet is one line");
 
 const { isAllowedEspnIngestHref, isLiveEspnCaptureHref } = require("../src/lib/espn") as typeof import("../src/lib/espn");
 assert(isAllowedEspnIngestHref("https://fantasy.espn.com/football/draft?leagueId=1"), "espn href allowed");
@@ -425,8 +433,33 @@ assert(listenSrc.includes("stale"), "listen reports stale without wiping picks")
 assert(relaySrc.includes("isLiveEspnCaptureHref"), "relay ignores href-less leftover instead of merging");
 
 const bmKeep = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/lib/espn-bookmarklet.ts"), "utf8");
-assert(bmKeep.includes("nowKeep-lastBeat") || bmKeep.includes("Soft heartbeat"), "bookmarklet soft-heartbeat when sig unchanged");
+assert(bmKeep.includes("nowKeep-lastBeat"), "bookmarklet soft-heartbeat when sig unchanged");
 assert(bmKeep.includes("via relay"), "bookmarklet reports ntfy relay when localhost ingest fails");
+assert(bmKeep.includes("700"), "localhost ingest aborts so badge does not wait on Cursor VM");
+
+const { isLeftoverEspnTestPicks } = require("../src/lib/leftover-tests") as typeof import("../src/lib/leftover-tests");
+assert(
+  isLeftoverEspnTestPicks({
+    leagueId: "96402745",
+    picks: [
+      { playerName: "Jahmyr Gibbs" },
+      { playerName: "Bijan Robinson" },
+      { playerName: "Justin Jefferson" },
+    ],
+  }),
+  "leftover agent ESPN test is recognized",
+);
+assert(
+  !isLeftoverEspnTestPicks({
+    leagueId: "1361349772",
+    picks: [
+      { playerName: "Jahmyr Gibbs" },
+      { playerName: "Bijan Robinson" },
+      { playerName: "Justin Jefferson" },
+    ],
+  }),
+  "real JFL league is not treated as leftover",
+);
 
 const ingestSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/ingest/route.ts"), "utf8");
 assert(ingestSrc.includes("heartbeat: true"), "ingest empty-with-prior refreshes as heartbeat");

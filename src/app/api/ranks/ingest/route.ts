@@ -7,6 +7,7 @@ import {
   resolveEspnBookmarkOrigin,
 } from "@/lib/espn";
 import { commitRankScrape } from "@/lib/ranks-apply";
+import { isLeftoverAgentRankSnapshot } from "@/lib/leftover-tests";
 import {
   clearRanksIngest,
   getRanksIngest,
@@ -14,7 +15,7 @@ import {
   type RankIngestRow,
 } from "@/lib/ranks-ingest";
 import { pullRanksRelayIntoIngest, ranksRelayUrl } from "@/lib/ranks-relay";
-import { buildRanksBookmarklet } from "@/lib/ranks-bookmarklet";
+import { buildCompressedRanksBookmarklet } from "@/lib/bookmarklet-compress";
 import { RANKS_RELAY_URL } from "@/lib/relay-urls";
 import type { RankImportSource } from "@/lib/parse-import";
 
@@ -61,6 +62,11 @@ export async function GET(req: Request) {
     clearRanksIngest();
   }
   await pullRanksRelayIntoIngest();
+  {
+    const prior = getRanksIngest();
+    if (prior.fp && isLeftoverAgentRankSnapshot(prior.fp)) clearRanksIngest("fp");
+    if (prior.ds && isLeftoverAgentRankSnapshot(prior.ds)) clearRanksIngest("ds");
+  }
   const store = getRanksIngest();
   const publicOrigin = requestPublicOrigin(req);
   const pageOrigin = url.searchParams.get("origin") || publicOrigin;
@@ -93,8 +99,8 @@ export async function GET(req: Request) {
     ingestUrl: `${publicOrigin}/api/ranks/ingest`,
     relayUrl: relay,
     bookmarklets: {
-      fp: buildRanksBookmarklet(origin, "fp", RANKS_RELAY_URL),
-      ds: buildRanksBookmarklet(origin, "ds", RANKS_RELAY_URL),
+      fp: buildCompressedRanksBookmarklet(origin, "fp", RANKS_RELAY_URL),
+      ds: buildCompressedRanksBookmarklet(origin, "ds", RANKS_RELAY_URL),
     },
     loopback: isLoopbackOrigin(origin) || diag.loopback,
     loopbackRisk: diag.loopbackRisk || isLoopbackOrigin(origin),

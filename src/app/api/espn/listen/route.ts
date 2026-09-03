@@ -13,6 +13,8 @@ import {
 } from "@/lib/espn";
 import { clearIngest, getIngest } from "@/lib/espn-ingest";
 import { getRelayTopic, pullRelayIntoIngest, relayUrl } from "@/lib/espn-relay";
+import { buildCompressedEspnBookmarklet } from "@/lib/bookmarklet-compress";
+import { ESPN_RELAY_URL } from "@/lib/relay-urls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,6 +37,10 @@ function listenMeta(req: Request) {
     loopback: origin.loopback,
     loopbackRisk: origin.loopbackRisk,
     loopbackHostMismatch: origin.loopbackHostMismatch,
+    bookmarklet: buildCompressedEspnBookmarklet(
+      publicOrigin || "http://127.0.0.1:43173",
+      ntfy || ESPN_RELAY_URL,
+    ),
   };
 }
 

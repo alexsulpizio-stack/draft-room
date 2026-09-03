@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isAllowedEspnIngestHref, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, originDiagnostics, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 import { getRelayTopic, relayUrl } from "@/lib/espn-relay";
+import { buildCompressedEspnBookmarklet } from "@/lib/bookmarklet-compress";
+import { ESPN_RELAY_URL } from "@/lib/relay-urls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,6 +47,7 @@ export async function GET(req: Request) {
     ingestUrl: `${publicOrigin}/api/espn/ingest`,
     relayTopic: topic,
     relayUrl: relayUrl(topic),
+    bookmarklet: buildCompressedEspnBookmarklet(publicOrigin || "http://127.0.0.1:43173", relayUrl(topic) || ESPN_RELAY_URL),
     configuredOrigin: origin.configuredOrigin,
     requestHostOrigin: origin.requestHostOrigin,
     loopback: origin.loopback,

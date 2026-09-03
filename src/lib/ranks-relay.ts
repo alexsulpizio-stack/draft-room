@@ -1,6 +1,7 @@
 import { NTFY_HOST, RANKS_RELAY_TOPIC } from "./relay-urls";
 import { commitRankScrape } from "./ranks-apply";
 import { isAllowedRanksIngestHref, type RankIngestRow } from "./ranks-ingest";
+import { isLeftoverAgentRankSnapshot, isLeftoverTestNtfyTitle } from "./leftover-tests";
 import type { RankImportSource } from "./parse-import";
 
 export { RANKS_RELAY_TOPIC };
@@ -123,6 +124,15 @@ export function selectBestRankSnapshots(bodies: string[]): {
     // A newer test/wrong-site post (e.g. source=fp + espn.com href) must not
     // hide an older real FantasyPros / DraftSharks snapshot.
     if (unpacked.href && !isAllowedRanksIngestHref(unpacked.source, unpacked.href)) continue;
+    if (
+      isLeftoverAgentRankSnapshot({
+        matched: unpacked.rows.length,
+        ts: unpacked.ts,
+        rows: unpacked.rows,
+      })
+    ) {
+      continue;
+    }
     const key = groupKey(unpacked.source, unpacked.ts);
     let g = groups.get(key);
     if (!g) {
@@ -163,7 +173,7 @@ export function selectBestRankSnapshots(bodies: string[]): {
   return best;
 }
 
-type NtfyLine = { event?: string; message?: string };
+type NtfyLine = { event?: string; message?: string; title?: string };
 
 export async function pullRanksRelayIntoIngest(): Promise<boolean> {
   const url = `${NTFY_HOST}/${RANKS_RELAY_TOPIC}/json?poll=1&since=2h`;
@@ -183,6 +193,7 @@ export async function pullRanksRelayIntoIngest(): Promise<boolean> {
       }
       if (msg.event && msg.event !== "message") continue;
       if (!msg.message) continue;
+      if (isLeftoverTestNtfyTitle(msg.title)) continue;
       bodies.push(msg.message);
     }
     const best = selectBestRankSnapshots(bodies);

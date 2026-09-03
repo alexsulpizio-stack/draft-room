@@ -73,6 +73,8 @@ import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PlayerSubline, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 import { RanksLiveSyncPanel } from "@/components/ranks-live-sync";
+import { RelayPulse } from "@/components/relay-pulse";
+import { isLeftoverAgentRankSnapshot } from "@/lib/leftover-tests";
 import { matchByName, mergeBoardWithEspnExtras } from "@/lib/espn";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
@@ -202,6 +204,31 @@ function playerListKey(player: Player, index?: number) {
   return [player.id, player.name, player.team, player.pos, index ?? ""].join(":");
 }
 
+function stripLeftoverLeagueRanks(ranks: LeagueRanks): LeagueRanks {
+  const next: LeagueRanks = {};
+  if (
+    ranks.fp &&
+    !isLeftoverAgentRankSnapshot({
+      matched: ranks.fp.matched,
+      ts: ranks.fp.importedAt,
+      patches: ranks.fp.patches,
+    })
+  ) {
+    next.fp = ranks.fp;
+  }
+  if (
+    ranks.ds &&
+    !isLeftoverAgentRankSnapshot({
+      matched: ranks.ds.matched,
+      ts: ranks.ds.importedAt,
+      patches: ranks.ds.patches,
+    })
+  ) {
+    next.ds = ranks.ds;
+  }
+  return next;
+}
+
 function posFilterList(settings: LeagueSettings): Array<Position | "ALL"> {
   const list: Array<Position | "ALL"> = ["ALL", "QB", "RB", "WR", "TE"];
   if (settings.roster.k > 0) list.push("K");
@@ -227,7 +254,7 @@ export function DraftApp() {
           draftType: parsed.settings?.draftType ?? "snake",
         },
         extras: parsed.extras ?? [],
-        leagueRanks: parsed.leagueRanks ?? {},
+        leagueRanks: stripLeftoverLeagueRanks(parsed.leagueRanks ?? {}),
       };
     } catch {
       return EMPTY;
@@ -295,7 +322,11 @@ export function DraftApp() {
   const openLeagueImport = useCallback((source: RankImportSource = "fp") => {
     setImportSource(source);
     setImportOpen(true);
-    setImportMsg(null);
+    setImportMsg(
+      source === "ds"
+        ? "This chip only opens help. Copy Sync DS ranks and click that BOOKMARK on draftsharks.com — not here."
+        : "This chip only opens help. Copy Sync FP ranks and click that BOOKMARK on fantasypros.com — not here.",
+    );
   }, []);
 
   const board = useMemo(() => {
@@ -704,6 +735,7 @@ export function DraftApp() {
       lastTs: { current: number },
     ) => {
       if (!payload?.matched || !payload.ts || !payload.patches) return;
+      if (isLeftoverAgentRankSnapshot(payload)) return;
       if (payload.ts <= lastTs.current) return;
       if (Object.keys(payload.patches).length === 0) return;
       const cur = dataRef.current;
@@ -811,12 +843,7 @@ export function DraftApp() {
             >
               v{BUILD_LABEL}
             </span>
-            <span
-              className="hidden rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary sm:inline"
-              title="ESPN, FantasyPros, and DraftSharks bookmarks post through ntfy. You do not need a Cursor share URL."
-            >
-              Relay · no share URL
-            </span>
+            <RelayPulse />
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">

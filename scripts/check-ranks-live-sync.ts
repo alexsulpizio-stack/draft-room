@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { ranksBookmarkletCode, buildRanksBookmarklet } from "../src/lib/ranks-bookmarklet";
+import { buildCompressedRanksBookmarklet } from "../src/lib/bookmarklet-compress";
 import {
   clearRanksIngest,
   getRanksIngest,
@@ -19,10 +20,16 @@ assert.match(fpCode, /draft-room-ranks-badge-\"\+SRC/);
 assert.match(fpCode, /ntfy\.sh\/drjfl28jackal-ranks/);
 assert.match(fpCode, /packChunks/);
 assert.match(fpCode, /via relay/);
+assert.match(fpCode, /badge\(0,"starting"\)/);
 
 const fpHref = buildRanksBookmarklet("http://127.0.0.1:43173", "fp");
 assert.ok(fpHref.startsWith("javascript:"));
 assert.doesNotMatch(fpHref, /\n/);
+const fpPacked = buildCompressedRanksBookmarklet("http://127.0.0.1:43173", "fp", "https://ntfy.sh/drjfl28jackal-ranks");
+assert.ok(fpPacked.startsWith("javascript:"));
+assert.ok(fpPacked.length < 9000, `compressed FP bookmarklet ${fpPacked.length}`);
+assert.match(fpPacked, /DecompressionStream/);
+assert.match(fpPacked, /badge\(0,"starting"\)/);
 
 const dsHref = buildRanksBookmarklet("https://example.preview.dev", "ds");
 assert.ok(dsHref.startsWith("javascript:"));
@@ -30,6 +37,9 @@ assert.match(dsHref, /draftsharks\.com/);
 assert.match(dsHref, /example\.preview\.dev/);
 assert.match(dsHref, /\/api\/ranks\/ingest/);
 assert.doesNotMatch(dsHref, /\n/);
+const dsPacked = buildCompressedRanksBookmarklet("https://example.preview.dev", "ds", "https://ntfy.sh/drjfl28jackal-ranks");
+assert.ok(dsPacked.length < 9000, `compressed DS bookmarklet ${dsPacked.length}`);
+assert.match(dsPacked, /draftsharks/);
 
 assert.equal(isAllowedRanksIngestHref("fp", "https://draftwizard.fantasypros.com/d/rdr.jsp"), true);
 assert.equal(isAllowedRanksIngestHref("fp", "https://www.fantasypros.com/nfl/rankings/"), true);

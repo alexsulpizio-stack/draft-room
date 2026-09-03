@@ -85,6 +85,7 @@ export function RanksLiveSyncPanel({
   const [loopbackHostMismatch, setLoopbackHostMismatch] = useState(false);
   const [relayUrl, setRelayUrl] = useState(RANKS_RELAY_URL);
   const [copied, setCopied] = useState(false);
+  const [serverBookmarklet, setServerBookmarklet] = useState("");
 
   useEffect(() => {
     setPageOrigin(window.location.origin);
@@ -103,6 +104,7 @@ export function RanksLiveSyncPanel({
             publicOrigin?: string;
             relayUrl?: string;
             loopbackHostMismatch?: boolean;
+            bookmarklets?: { fp?: string; ds?: string };
           }>,
       )
       .then((json) => {
@@ -115,9 +117,13 @@ export function RanksLiveSyncPanel({
         if (typeof json.loopbackHostMismatch === "boolean") {
           setLoopbackHostMismatch(json.loopbackHostMismatch);
         }
+        const packed = json.bookmarklets?.[source];
+        if (typeof packed === "string" && packed.startsWith("javascript:")) {
+          setServerBookmarklet(packed);
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [source]);
 
   const reachablePublic =
     storedPublicOrigin ||
@@ -128,10 +134,11 @@ export function RanksLiveSyncPanel({
     resolveEspnBookmarkOrigin(pageOrigin, reachablePublic || publicOrigin) ||
     pageOrigin ||
     "http://127.0.0.1:43173";
-  const bookmarkHref = useMemo(
+  const localBookmarkHref = useMemo(
     () => buildRanksBookmarklet(origin, source, relayUrl || RANKS_RELAY_URL),
     [origin, source, relayUrl],
   );
+  const bookmarkHref = serverBookmarklet || localBookmarkHref;
   const loopback = isLoopbackOrigin(origin);
   const label = source === "ds" ? "Sync DS ranks" : "Sync FP ranks";
   const hostHint =
@@ -171,12 +178,12 @@ export function RanksLiveSyncPanel({
         ) : null}
       </div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Chrome extensions (FP Side Assistant / DS Sync sidebar on ESPN) stay private to those
-        plugins — Draft Room cannot read them. Keep the full {hostHint} open in another tab and
-        click this bookmark there. It scrapes the visible remaining board and posts ranks here
-        every few seconds (direct ingest when reachable, otherwise the ntfy relay{" "}
+        The Sync {source === "ds" ? "DS" : "FP"} chip in the header only opens this help. A teal
+        badge appears on {source === "ds" ? "DraftSharks" : "FantasyPros"}, not here. Keep the full{" "}
+        {hostHint} open and click the <span className="font-medium text-foreground">{label}</span>{" "}
+        bookmark there (not on ESPN / Draft Room). Posts go through ntfy{" "}
         <span className="font-mono">{(relayUrl || RANKS_RELAY_URL).replace("https://", "")}</span>
-        ).
+        . Chrome extensions on ESPN cannot be read.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <BookmarkletAnchor

@@ -78,7 +78,7 @@ All three bookmarklets post to a public ntfy relay, and Draft Room polls that re
 
 Direct POST to Draft Room still happens when that origin is reachable (true local `next dev` on the same machine). On Cursor cloud it fails silently; the relay is the path that works.
 
-After every Draft Room update: **delete** old Sync ESPN / FP / DS bookmarks, **Copy script**, paste as the bookmark URL (React strips `javascript:` from drag), then click each on the matching site. Green ESPN badge / teal FP·DS badge (may say “via relay”) means the scrape is running.
+After every Draft Room update: **delete** old Sync ESPN / FP / DS bookmarks, **Copy script**, paste as the bookmark URL (React strips `javascript:` from drag — a saved `#` never runs, so there is no badge), then click each on the matching site. Scripts are kept under Chrome’s bookmark URL budget so they actually save. Green ESPN badge / teal FP·DS badge (may say “via relay”) appears **before** the ntfy POST. The header **Relay** chip shows last ntfy receive time; **Test relay** pings ntfy with 0 picks (never marks leftover test players taken).
 
 Optional: if you have a reachable share/preview host, paste it under **Optional: bake a public Draft Room URL** (or set `DRAFT_ROOM_PUBLIC_URL`) and re-copy scripts so they skip the relay. True local-only drafts on the same machine can ignore this.
 

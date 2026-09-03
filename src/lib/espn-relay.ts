@@ -9,6 +9,7 @@ import {
 } from "./espn";
 import { setIngest, getIngest, type IngestPayload } from "./espn-ingest";
 import { ESPN_RELAY_TOPIC, NTFY_HOST } from "./relay-urls";
+import { isLeftoverEspnTestPicks, isLeftoverTestNtfyTitle } from "./leftover-tests";
 
 const TOPIC_PATHS = [
   `${process.cwd()}/.data/espn-relay-topic`,
@@ -91,7 +92,7 @@ export function unpackRelayMessage(raw: string): UnpackedRelay | null {
   return null;
 }
 
-type NtfyLine = { event?: string; message?: string; time?: number };
+type NtfyLine = { event?: string; message?: string; time?: number; title?: string };
 
 /** Merge a polled ntfy snapshot into ingest. Never apply older messages after an intentional clear. Never shrink picks. */
 export function applyRelayToIngest(
@@ -161,9 +162,18 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
       }
       if (msg.event && msg.event !== "message") continue;
       if (!msg.message) continue;
+      if (isLeftoverTestNtfyTitle(msg.title)) continue;
       const unpacked = unpackRelayMessage(msg.message);
       if (!unpacked) continue;
       if (!unpacked.href || !isAllowedEspnIngestHref(unpacked.href)) continue;
+      if (
+        isLeftoverEspnTestPicks({
+          picks: unpacked.picks,
+          leagueId: unpacked.meta?.leagueId,
+        })
+      ) {
+        continue;
+      }
       if (unpacked.picks.length) {
         if (!best || unpacked.ts >= best.ts) best = unpacked;
       } else if (unpacked.meta || unpacked.href) {
