@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  clampEspnPickOrder,
   extrasFromMapped,
   fetchEspnLeague,
   loadEspnPlayers,
@@ -45,11 +46,13 @@ export async function POST(req: Request) {
 
   if (!fetched.ok || !fetched.payload) {
     if (ingest?.picks.length) {
+      const teamsCount = ingest.meta?.teams || Number(body.teams) || 12;
+      const pickOrder = clampEspnPickOrder(ingest.meta?.pickOrder, teamsCount) ?? [];
       const mapped = remapMappedPicks(
         mapEspnPicks({
           picks: ingest.picks,
-          pickOrder: [],
-          teamsCount: ingest.meta?.teams || Number(body.teams) || 12,
+          pickOrder,
+          teamsCount,
           players,
           draftType:
             ingest.meta?.draftType === "linear" || body.draftType === "linear" ? "linear" : "snake",

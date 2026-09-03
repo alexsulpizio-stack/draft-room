@@ -19,9 +19,43 @@ export type EspnIngestMeta = {
   leagueName?: string;
   draftType?: DraftType;
   teamNames?: string[];
+  /** ESPN team ids in draft order (slot 1 = pickOrder[0]). */
+  pickOrder?: number[];
   /** Bookmarklet 0-pick reason: no leagueId / 0 filled slots / ESPN 401. */
   reason?: string;
 };
+
+/** Normalize ESPN pickOrder arrays from ingest meta / league settings. */
+export function clampEspnPickOrder(
+  order: unknown,
+  teams?: number,
+): number[] | undefined {
+  if (!Array.isArray(order) || order.length < 2) return undefined;
+  const ids = order.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0);
+  if (ids.length < 2) return undefined;
+  if (teams && ids.length !== teams) return undefined;
+  return ids;
+}
+
+/**
+ * Map an ESPN pick to a Draft Room 1-based slot.
+ * Prefer pickOrder index when teamId is present; never treat raw ESPN teamId as
+ * the draft slot when pickOrder is missing — fall back to overall + draft type.
+ */
+export function resolveEspnTeamSlot(args: {
+  teamId: number;
+  overall: number;
+  pickOrder: number[];
+  teamsCount: number;
+  draftType?: DraftType;
+}): number {
+  const { teamId, overall, pickOrder, teamsCount, draftType = "snake" } = args;
+  if (teamId > 0 && pickOrder.length > 0) {
+    const orderIdx = pickOrder.indexOf(teamId);
+    if (orderIdx >= 0) return orderIdx + 1;
+  }
+  return pickOwner(overall, teamsCount, draftType);
+}
 
 export function espnLeagueHomeUrl(leagueId: string, season = 2026) {
   const id = parseLeagueId(leagueId) || leagueId.trim();
@@ -65,8 +99,14 @@ export function mergeIngestMeta(
   const teams = clampEspnTeams(body?.teams);
   const leagueName = body?.leagueName?.trim()
     || (title && !/^Fantasy Football/i.test(title) ? title.trim() : undefined);
-  const slot = body?.slot && body.slot >= 1 && body.slot <= 20 ? body.slot : undefined;
+  const pickOrder = clampEspnPickOrder(body?.pickOrder, teams);
   const teamId = body?.teamId || fromHref.teamId;
+  let slot = body?.slot && body.slot >= 1 && body.slot <= 20 ? body.slot : undefined;
+  if (!slot && teamId && pickOrder?.length) {
+    const ix = pickOrder.indexOf(teamId);
+    if (ix >= 0) slot = ix + 1;
+  }
+  // Do not treat raw ESPN teamId as draft slot — ids often differ from pick order.
   return {
     ...fromHref,
     ...body,
@@ -74,7 +114,8 @@ export function mergeIngestMeta(
     season: body?.season || fromHref.season,
     teamId,
     teams,
-    slot: slot || (teamId && teams && teamId <= teams ? teamId : undefined),
+    pickOrder,
+    slot,
     leagueName,
     draftType: body?.draftType === "linear" ? "linear" : body?.draftType === "snake" ? "snake" : undefined,
   };
@@ -85,9 +126,13 @@ export function patchSettingsFromEspnMeta(
   meta: EspnIngestMeta,
 ): LeagueSettings {
   const teams = clampEspnTeams(meta.teams) ?? current.teams;
+  const pickOrder = clampEspnPickOrder(meta.pickOrder, teams);
   let slot = current.slot;
   if (meta.slot && meta.slot >= 1 && meta.slot <= teams) slot = meta.slot;
-  else if (meta.teamId && meta.teamId >= 1 && meta.teamId <= teams) slot = meta.teamId;
+  else if (meta.teamId && pickOrder?.length) {
+    const ix = pickOrder.indexOf(meta.teamId);
+    if (ix >= 0) slot = ix + 1;
+  }
   const switchedLeague = Boolean(meta.leagueId && meta.leagueId !== current.espnLeagueId);
   const names =
     meta.teamNames && meta.teamNames.length === teams
@@ -1017,13 +1062,13 @@ export function mapEspnPicks(args: {
       }
       if (usedIds.has(ourId)) ourId = unmatchedEspnId(name, p.overallPickNumber) + `-p${p.overallPickNumber}`;
       usedIds.add(ourId);
-      const orderIdx = p.teamId ? pickOrder.indexOf(p.teamId) : -1;
-      const team =
-        orderIdx >= 0
-          ? orderIdx + 1
-          : p.teamId >= 1 && p.teamId <= teamsCount
-            ? p.teamId
-            : pickOwner(p.overallPickNumber, teamsCount, draftType);
+      const team = resolveEspnTeamSlot({
+        teamId: p.teamId,
+        overall: p.overallPickNumber,
+        pickOrder,
+        teamsCount,
+        draftType,
+      });
       return {
         overall: p.overallPickNumber,
         team,

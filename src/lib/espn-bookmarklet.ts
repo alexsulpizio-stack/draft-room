@@ -9,7 +9,7 @@ var POLL=5000;
 var API="https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
 function takeSize(n){n=Number(n);return (n>=2&&n<=20)?n:0;}
 function urlMeta(){
-  var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null,slot:0,draftId:""};
+  var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null,pickOrder:null,slot:0,draftId:""};
   try{
     var href=String(location.href||"");
     var sp=new URLSearchParams(location.search);
@@ -44,18 +44,20 @@ function applyLeague(json,meta){
   else meta.draftType=meta.draftType||"snake";
   var teams=Array.isArray(json.teams)?json.teams:[];
   var order=(ds.pickOrder&&ds.pickOrder.length)?ds.pickOrder:teams.map(function(t){return t.id;});
+  if(order&&order.length>=2){
+    meta.pickOrder=order.map(function(id){return Number(id);}).filter(function(n){return n>0;});
+  }
   if(teams.length>=2&&teams.length<=20){
     if(!meta.teams) meta.teams=teams.length;
     var byId={};
     teams.forEach(function(t){if(t&&t.id!=null) byId[t.id]=t;});
-    meta.teamNames=order.map(function(id,i){return teamName(byId[id],i);});
+    meta.teamNames=(meta.pickOrder&&meta.pickOrder.length?meta.pickOrder:order).map(function(id,i){return teamName(byId[id],i);});
   }
-  if(meta.teamId&&order.length){
-    var ix=order.indexOf(meta.teamId);
-    if(ix<0) ix=order.indexOf(Number(meta.teamId));
+  if(meta.teamId&&meta.pickOrder&&meta.pickOrder.length){
+    var ix=meta.pickOrder.indexOf(meta.teamId);
+    if(ix<0) ix=meta.pickOrder.indexOf(Number(meta.teamId));
     if(ix>=0) meta.slot=ix+1;
   }
-  if(!meta.slot&&meta.teamId&&meta.teams&&meta.teamId>=1&&meta.teamId<=meta.teams) meta.slot=meta.teamId;
   if(!meta.teams) meta.teams=12;
   return meta;
 }

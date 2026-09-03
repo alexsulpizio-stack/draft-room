@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  clampEspnPickOrder,
   extrasFromMapped,
   loadEspnPlayers,
   mapEspnPicks,
@@ -84,12 +85,13 @@ export async function GET(req: Request) {
 
   const meta = mergeIngestMeta(last.meta, last.href, last.title);
   const teamsCount = meta.teams || fallbackTeams;
+  const pickOrder = clampEspnPickOrder(meta.pickOrder, teamsCount) ?? [];
   const season = meta.season || 2026;
   const players = await loadEspnPlayers(season);
   const mapped = remapMappedPicks(
     mapEspnPicks({
       picks: last.picks,
-      pickOrder: [],
+      pickOrder,
       teamsCount,
       players,
       draftType: meta.draftType === "linear" ? "linear" : "snake",
