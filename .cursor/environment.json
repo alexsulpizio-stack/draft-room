@@ -1,0 +1,11 @@
+{
+  "name": "Draft Room",
+  "install": "npm install",
+  "start": "bash scripts/keep-dev-server.sh",
+  "terminals": [
+    {
+      "name": "draft-room-dev",
+      "command": "bash scripts/keep-dev-server.sh"
+    }
+  ]
+}
