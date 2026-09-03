@@ -1280,7 +1280,7 @@ var POLL=5000;
 var API="https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
 function takeSize(n){n=Number(n);return (n>=2&&n<=20)?n:0;}
 function urlMeta(){
-  var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null,slot:0};
+  var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null,slot:0,draftId:""};
   try{
     var href=String(location.href||"");
     var sp=new URLSearchParams(location.search);
@@ -1295,6 +1295,7 @@ function urlMeta(){
       if(sm) meta.season=Number(sm[1]);
     }
     meta.teamId=Number(sp.get("teamId")||0)||0;
+    meta.draftId=sp.get("draftId")||sp.get("draftChannelId")||sp.get("mockDraftId")||"";
   }catch(e){}
   return meta;
 }
@@ -1340,6 +1341,11 @@ function unwrap(json){
 function pid(p){
   var n=Number(p.playerId||0); if(n>0) return n;
   if(p.player&&typeof p.player==="object"){ n=Number(p.player.id||0); if(n>0) return n; }
+  var ppe=p.playerPoolEntry;
+  if(ppe&&typeof ppe==="object"){
+    n=Number(ppe.playerId||0); if(n>0) return n;
+    if(ppe.player&&typeof ppe.player==="object"){ n=Number(ppe.player.id||0); if(n>0) return n; }
+  }
   n=Number(p.athleteId||0); if(n>0) return n;
   return 0;
 }
@@ -1420,6 +1426,16 @@ function takePicks(json){
       }
     }
   }
+  if(!out.length&&Array.isArray(json.players)){
+    for(i=0;i<json.players.length;i++){
+      p=json.players[i]; if(!p||typeof p!=="object") continue;
+      var on=Number(p.onTeamId||0); if(!(on>0)) continue;
+      playerId=pid(p);
+      name=pname(p,names);
+      if(!playerId&&!name) continue;
+      out.push({overallPickNumber:out.length+1,playerId:playerId,teamId:on,playerName:name});
+    }
+  }
   return out;
 }
 function isLeaguePayload(json){
@@ -1440,19 +1456,19 @@ function badge(n,meta,err){
     document.body.appendChild(b);
   }
   var why=err?String(err):"";
-  var fail=!!why||!n;
-  b.style.background=fail?"#9b1c1c":"#1f6a45";
   var label=(meta&&meta.leagueName)?meta.leagueName:(meta&&meta.leagueId)?("League "+meta.leagueId):"this ESPN draft";
-  if(why&&n){
-    b.textContent="Draft Room · "+n+" picks captured, ingest failed: "+why+". Posts to "+O+"/api/espn/ingest";
-    return;
-  }
   var clock=new Date().toLocaleTimeString();
-  if(fail){
-    b.textContent="Draft Room · 0 picks — "+(why||emptyWhy(meta))+" · "+clock+(RELAY?" · relay on":"");
+  var waiting=!n&&!!(meta&&(meta.leagueName||meta.leagueId));
+  b.style.background=n||waiting?"#1f6a45":"#9b1c1c";
+  if(n){
+    b.textContent="Draft Room is syncing "+n+" picks from "+label+" · "+clock;
     return;
   }
-  b.textContent="Draft Room is syncing "+n+" picks from "+label+" · "+clock;
+  if(waiting){
+    b.textContent="Draft Room connected to "+label+" · 0 picks · waiting · "+clock;
+    return;
+  }
+  b.textContent="Draft Room · 0 picks — "+(why||emptyWhy(meta))+" · "+clock;
 }
 function idle(fn){
   if(typeof requestIdleCallback==="function") requestIdleCallback(function(){fn();},{timeout:1500});
@@ -1490,7 +1506,7 @@ function post(picks,meta,err){
     hmeta.reason=why;
     badge(0,hmeta,why);
     var hsig="0:"+why+":"+(meta&&meta.leagueId||"");
-    if(hsig===lastSig) return;
+    if(hsig===lastSig){ badge(0,hmeta,why); return; }
     lastSig=hsig;
     fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({picks:[],href:location.href,title:document.title,ts:Date.now(),meta:hmeta}),mode:"cors",keepalive:true}).catch(function(){});
     return;
@@ -1515,9 +1531,12 @@ function post(picks,meta,err){
 }
 function ingestJson(json){
   json=unwrap(json);
-  if(!isLeaguePayload(json)) return;
-  var meta=applyLeague(json,urlMeta());
-  post(takePicks(json),meta);
+  if(!json||typeof json!=="object") return;
+  if(json.draftPick&&typeof json.draftPick==="object") json={picks:[json.draftPick]};
+  var got=takePicks(json);
+  if(!got.length&&!isLeaguePayload(json)) return;
+  var meta=applyLeague(json,lastMeta||urlMeta());
+  post(got,meta);
 }
 function draftUrl(u){
   u=String(u||"");
@@ -1587,6 +1606,10 @@ function pullApi(){
   var season=meta.season||2026;
   var path="/apis/v3/games/ffl/seasons/"+season+"/segments/0/leagues/"+meta.leagueId+"?"+views;
   var urls=[location.origin+path,"https://fantasy.espn.com"+path,"https://gambit-api.fantasy.espn.com"+path,API+"/seasons/"+season+"/segments/0/leagues/"+meta.leagueId+"?"+views];
+  if(meta.draftId){
+    urls.unshift(location.origin+"/apis/v3/games/ffl/seasons/"+season+"/drafts/"+meta.draftId);
+    urls.unshift("https://gambit-api.fantasy.espn.com/apis/v1/games/ffl/seasons/"+season+"/drafts/"+meta.draftId);
+  }
   var i=0,lastErr="";
   function tryNext(){
     if(i>=urls.length){

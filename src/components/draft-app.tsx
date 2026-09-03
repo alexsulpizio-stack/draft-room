@@ -562,11 +562,13 @@ export function DraftApp() {
             <span className="text-muted-foreground">
               {" "}
               · {espn.pickCount} picks
-              {espn.source === "room-capture"
-                ? " · room capture"
-                : espn.source === "espn-api"
-                  ? " · league API"
-                  : " · waiting for picks"}
+              {espn.pickCount === 0
+                ? " · waiting for pick 1"
+                : espn.source === "room-capture"
+                  ? " · room capture"
+                  : espn.source === "espn-api"
+                    ? " · league API"
+                    : " · waiting for picks"}
               {espn.leagueName ? ` · ${espn.leagueName}` : ""}
               {espn.warning ? ` · ${espn.warning}` : ""}
             </span>

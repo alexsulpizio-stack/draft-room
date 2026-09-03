@@ -363,6 +363,7 @@ export function EspnSync({
         publicOrigin?: string;
         ingestUrl?: string;
         relayUrl?: string;
+        connected?: boolean;
       };
       if (typeof json.publicOrigin === "string" && json.publicOrigin) {
         setPublicOrigin(json.publicOrigin);
@@ -371,9 +372,27 @@ export function EspnSync({
         setRelayUrl(json.relayUrl);
       }
       if (!json.ingest || !json.picks?.length) {
-        const why = json.reason || json.meta?.reason;
+        const meta = json.meta ?? {};
+        if (json.connected || meta.leagueName || meta.leagueId) {
+          const label = meta.leagueName || `League ${meta.leagueId}`;
+          const nextSettings = patchSettingsFromEspnMeta(settingsRef.current, meta);
+          const waitSig = `wait:${meta.leagueId ?? ""}:${meta.slot ?? ""}:${meta.teams ?? ""}`;
+          if (listenSig.current !== waitSig) {
+            listenSig.current = waitSig;
+            onPicksRef.current([], [], nextSettings);
+          }
+          setIngestHint(`Connected to ${label}. ESPN has not filled a pick yet.`);
+          setStatus({
+            live: true,
+            source: "room-capture",
+            pickCount: 0,
+            leagueName: label,
+          });
+          return;
+        }
+        const why = json.reason || meta.reason;
         if (why) setIngestHint(why);
-        else if (!json.ingest) setIngestHint(null);
+        else setIngestHint(null);
         if (listenSig.current || statusRef.current.source === "room-capture") {
           listenSig.current = "";
           onPicksRef.current([], [], settingsRef.current);
