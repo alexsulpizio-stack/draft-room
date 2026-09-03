@@ -42,6 +42,13 @@ export function getRelayTopic(): string {
   return topic;
 }
 
+/** Drop a polluted topic (test posts) so listen cannot revive fake picks. */
+export function rotateRelayTopic(): string {
+  const topic = `dr${randomBytes(8).toString("hex")}`;
+  writeTopic(topic);
+  return topic;
+}
+
 export function relayUrl(topic = getRelayTopic()): string {
   return `${NTFY_HOST}/${topic}`;
 }
@@ -110,6 +117,7 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
       if (!msg.message) continue;
       const unpacked = unpackRelayMessage(msg.message);
       if (!unpacked?.picks.length) continue;
+      if (!unpacked.href || !/espn\.com/i.test(unpacked.href)) continue;
       if (!best || unpacked.ts >= best.ts) best = unpacked;
     }
     if (!best) return false;

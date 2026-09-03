@@ -374,6 +374,11 @@ export function EspnSync({
         const why = json.reason || json.meta?.reason;
         if (why) setIngestHint(why);
         else if (!json.ingest) setIngestHint(null);
+        if (listenSig.current || statusRef.current.source === "room-capture") {
+          listenSig.current = "";
+          onPicksRef.current([], [], settingsRef.current);
+          setStatus({ live: false, source: "empty", pickCount: 0 });
+        }
         return;
       }
       const meta = json.meta ?? {};

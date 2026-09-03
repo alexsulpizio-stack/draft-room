@@ -62,3 +62,16 @@ export function getIngest(): IngestPayload | null {
   if (disk && (!last || disk.ts >= last.ts)) last = disk;
   return last;
 }
+
+export function clearIngest() {
+  last = null;
+  const empty = JSON.stringify({ picks: [], ts: 0 });
+  for (const file of INGEST_PATHS) {
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, empty);
+    } catch {
+      /* next */
+    }
+  }
+}

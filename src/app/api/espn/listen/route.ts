@@ -7,8 +7,8 @@ import {
   remapMappedPicks,
   requestPublicOrigin,
 } from "@/lib/espn";
-import { getIngest } from "@/lib/espn-ingest";
-import { getRelayTopic, pullRelayIntoIngest, relayUrl } from "@/lib/espn-relay";
+import { clearIngest, getIngest } from "@/lib/espn-ingest";
+import { getRelayTopic, pullRelayIntoIngest, relayUrl, rotateRelayTopic } from "@/lib/espn-relay";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,7 +19,13 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const fallbackTeams = Number(url.searchParams.get("teams")) || 12;
   await pullRelayIntoIngest();
-  const last = getIngest();
+  let last = getIngest();
+  const href = last?.href ?? "";
+  if (last?.picks.length && href !== "paste" && !/espn\.com/i.test(href)) {
+    clearIngest();
+    rotateRelayTopic();
+    last = null;
+  }
   const publicOrigin = requestPublicOrigin(req);
   const ingestUrl = publicOrigin ? `${publicOrigin}/api/espn/ingest` : "";
   const topic = getRelayTopic();
