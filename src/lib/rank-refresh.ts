@@ -8,6 +8,8 @@ export type RankRefreshResult = {
   ok: boolean;
   scoring: Scoring;
   fetchedAt: number;
+  cached?: boolean;
+  ranksOnly?: boolean;
   fpUpdated?: string;
   fpMatched: number;
   dsMatched: number;
@@ -21,7 +23,22 @@ export type RankRefreshResult = {
   injuriesComplete: boolean;
   warnings: string[];
   error?: string;
+  nextAllowedAt?: number;
 };
+
+export const MIN_REFRESH_INTERVAL_MS = 60_000;
+export const LIVE_RANK_POLL_MS = 90_000;
+
+export type RankRefreshOptions = {
+  ranksOnly?: boolean;
+  force?: boolean;
+};
+
+type CacheEntry = { result: RankRefreshResult; fetchedAt: number };
+const refreshCache = new Map<string, CacheEntry>();
+function cacheKey(scoring: Scoring, ranksOnly: boolean) {
+  return `${scoring}:${ranksOnly ? "ranks" : "full"}`;
+}
 
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
@@ -402,7 +419,25 @@ function absorbHits(
   return total;
 }
 
-export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefreshResult> {
+/**
+ * Pull public FantasyPros ECR + DraftSharks 3D for `scoring`.
+ */
+export async function refreshLiveRankings(
+  scoring: Scoring,
+  opts: RankRefreshOptions = {},
+): Promise<RankRefreshResult> {
+  const ranksOnly = Boolean(opts.ranksOnly);
+  const key = cacheKey(scoring, ranksOnly);
+  const cached = refreshCache.get(key);
+  const now = Date.now();
+  if (!opts.force && cached && now - cached.fetchedAt < MIN_REFRESH_INTERVAL_MS) {
+    return {
+      ...cached.result,
+      cached: true,
+      nextAllowedAt: cached.fetchedAt + MIN_REFRESH_INTERVAL_MS,
+    };
+  }
+
   const warnings: string[] = [];
   const patches = new Map<string, RankPatch>();
   const injuries = new Map<string, Injury>();
@@ -416,10 +451,6 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
   let injuriesComplete = false;
 
   const fpJob = fetchText(fpUrl(scoring)).then(parseFantasyProsEcr);
-  const fpNewsJob = fetchText(FP_NEWS_URL).then(parseFantasyProsInjuryNews);
-  const injJobs = Array.from({ length: FP_INJURY_PAGES }, (_, i) =>
-    fetchText(fpInjuryNewsUrl(i + 1)).then(parseFantasyProsInjuryNews),
-  );
   const dsUrl =
     "https://www.draftsharks.com/rankings/load-table?" +
     new URLSearchParams({
@@ -435,7 +466,18 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
     ranks: parseDraftSharksTable(html),
     injuries: parseDraftSharksInjuries(html),
   }));
-  const espnJob = fetchText(ESPN_INJURIES_URL).then((text) => parseEspnInjuries(JSON.parse(text)));
+
+  const fpNewsJob = ranksOnly
+    ? Promise.reject(new Error("skipped"))
+    : fetchText(FP_NEWS_URL).then(parseFantasyProsInjuryNews);
+  const injJobs = ranksOnly
+    ? []
+    : Array.from({ length: FP_INJURY_PAGES }, (_, i) =>
+        fetchText(fpInjuryNewsUrl(i + 1)).then(parseFantasyProsInjuryNews),
+      );
+  const espnJob = ranksOnly
+    ? Promise.reject(new Error("skipped"))
+    : fetchText(ESPN_INJURIES_URL).then((text) => parseEspnInjuries(JSON.parse(text)));
 
   const [fpRes, fpNewsRes, dsRes, espnRes, ...injRes] = await Promise.allSettled([
     fpJob,
@@ -457,21 +499,25 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       cur.fpRank = next;
       patches.set(id, cur);
     }
-    injuryTotal += absorbHits(
-      injuries,
-      fpRes.value.players
-        .filter((p) => p.injury)
-        .map((p) => ({ name: p.name, pos: p.pos, team: p.team, injury: p.injury! })),
-      espnSeen,
-      {},
-    );
+    if (!ranksOnly) {
+      injuryTotal += absorbHits(
+        injuries,
+        fpRes.value.players
+          .filter((p) => p.injury)
+          .map((p) => ({ name: p.name, pos: p.pos, team: p.team, injury: p.injury! })),
+        espnSeen,
+        {},
+      );
+    }
   } else {
     warnings.push(`FantasyPros: ${fpRes.reason instanceof Error ? fpRes.reason.message : "failed"}`);
   }
 
-  for (const res of [fpNewsRes, ...injRes]) {
-    if (res.status === "fulfilled") {
-      injuryTotal += absorbHits(injuries, res.value, espnSeen, {});
+  if (!ranksOnly) {
+    for (const res of [fpNewsRes, ...injRes]) {
+      if (res.status === "fulfilled") {
+        injuryTotal += absorbHits(injuries, res.value, espnSeen, {});
+      }
     }
   }
 
@@ -486,32 +532,39 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       cur.dsRank = next;
       patches.set(id, cur);
     }
-    injuryTotal += absorbHits(injuries, dsRes.value.injuries, espnSeen, {});
+    if (!ranksOnly) {
+      injuryTotal += absorbHits(injuries, dsRes.value.injuries, espnSeen, {});
+    }
   } else {
     warnings.push(`DraftSharks: ${dsRes.reason instanceof Error ? dsRes.reason.message : "failed"}`);
   }
 
-  if (espnRes.status === "fulfilled") {
-    injuriesComplete = espnRes.value.length > 0;
-    injuryTotal += absorbHits(injuries, espnRes.value, espnSeen, { overwrite: true });
-  } else {
-    warnings.push(
-      `ESPN injuries: ${espnRes.reason instanceof Error ? espnRes.reason.message : "failed"}`,
-    );
+  if (!ranksOnly) {
+    if (espnRes.status === "fulfilled") {
+      injuriesComplete = espnRes.value.length > 0;
+      injuryTotal += absorbHits(injuries, espnRes.value, espnSeen, { overwrite: true });
+    } else if (espnRes.status === "rejected") {
+      const msg = espnRes.reason instanceof Error ? espnRes.reason.message : "failed";
+      if (msg !== "skipped") warnings.push(`ESPN injuries: ${msg}`);
+    }
   }
 
   const injuryMatched = injuries.size;
   const injuriesLive = injuryMatched > 0;
-  if (!injuriesLive) {
+  if (!ranksOnly && !injuriesLive) {
     warnings.push("Injuries: no current flags matched; snapshot injuries kept.");
   }
 
   const ranksOk = fpMatched > 0 || dsMatched > 0;
+  const fetchedAt = Date.now();
+  const nextAllowedAt = fetchedAt + MIN_REFRESH_INTERVAL_MS;
+
   if (!ranksOk && !injuriesLive) {
     return {
       ok: false,
       scoring,
-      fetchedAt: Date.now(),
+      fetchedAt,
+      ranksOnly,
       fpMatched: 0,
       dsMatched: 0,
       fpTotal,
@@ -523,6 +576,7 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
       injuriesLive: false,
       injuriesComplete: false,
       warnings,
+      nextAllowedAt,
       error: warnings.join(" · ") || "Could not refresh ranks or injuries.",
     };
   }
@@ -530,11 +584,19 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
   if (!ranksOk) {
     warnings.push("Ranks failed; live injury flags applied on the snapshot board.");
   }
+  if (ranksOnly) {
+    warnings.push(
+      "Live ranks: public FP ECR + DS 3D (not league War Room). League imports still override when present.",
+    );
+  }
 
-  return {
+  const result: RankRefreshResult = {
     ok: true,
     scoring,
-    fetchedAt: Date.now(),
+    fetchedAt,
+    ranksOnly,
+    cached: false,
+    nextAllowedAt,
     fpUpdated,
     fpMatched,
     dsMatched,
@@ -548,7 +610,14 @@ export async function refreshLiveRankings(scoring: Scoring): Promise<RankRefresh
     injuriesComplete,
     warnings,
   };
+  refreshCache.set(key, { result, fetchedAt });
+  return result;
 }
+
+export function clearRankRefreshCache() {
+  refreshCache.clear();
+}
+
 
 function keepRank(next: number | undefined, prev: number) {
   return typeof next === "number" && Number.isFinite(next) && next > 0 && next < UNRANKED ? next : prev;
