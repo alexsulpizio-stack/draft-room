@@ -278,15 +278,24 @@ export function DraftApp() {
   const [espn, setEspn] = useState<EspnLiveStatus>({ live: false, source: "empty", pickCount: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [autoRanks, setAutoRanks] = useState(true);
+  /** Hide the mid-draft league re-import banner until the next round boundary. */
+  const [leagueNudgeMutedUntilPick, setLeagueNudgeMutedUntilPick] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const refreshingRef = useRef(false);
   const lastAutoPickCount = useRef(-1);
+  const lastLeagueNudgeRound = useRef(-1);
   const dataRef = useRef(data);
   dataRef.current = data;
   const leagueRanksRef = useRef(leagueRanks);
   leagueRanksRef.current = leagueRanks;
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+
+  const openLeagueImport = useCallback((source: RankImportSource = "fp") => {
+    setImportSource(source);
+    setImportOpen(true);
+    setImportMsg(null);
+  }, []);
 
   const board = useMemo(() => {
     const refreshed = applyRankPatches(PLAYERS, rankOverlay?.patches);
@@ -313,10 +322,19 @@ export function DraftApp() {
     }
     return parts;
   }, [leagueRanks]);
+  const hasLeagueImport = Boolean(leagueRanks.fp?.matched || leagueRanks.ds?.matched);
   const byId = useMemo(() => new Map(board.map((p) => [p.id, p])), [board]);
   const overall = picks.length + 1;
   const totalPicks = settings.teams * settings.rounds;
   const done = picks.length >= totalPicks;
+  /** Reminder each completed round while ESPN is live and league imports are pinned. */
+  const draftRound = Math.floor(espn.pickCount / Math.max(1, settings.teams));
+  const showLeagueReimportNudge =
+    espn.live &&
+    !done &&
+    hasLeagueImport &&
+    draftRound >= 1 &&
+    espn.pickCount >= leagueNudgeMutedUntilPick;
   const onClock = done ? null : pickOwner(overall, settings.teams, settings.draftType ?? "snake");
   const isUserPick = onClock === settings.slot;
   const untilUser = picksUntilUser(overall, settings);
@@ -459,6 +477,7 @@ export function DraftApp() {
       } Blend / # / suggestions now use ${source === "ds" ? "these DS ranks" : "these FP ranks"} instead of generic ECR.`,
     );
     setImportOpen(false);
+    setLeagueNudgeMutedUntilPick(espn.pickCount + Math.max(1, settings.teams));
   };
 
   const clearLeagueSource = (source: RankImportSource) => {
@@ -632,6 +651,32 @@ export function DraftApp() {
     if (!espn.live) lastAutoPickCount.current = -1;
   }, [espn.live]);
 
+  useEffect(() => {
+    if (!espn.live || done || !hasLeagueImport) {
+      lastLeagueNudgeRound.current = -1;
+      return;
+    }
+    if (draftRound < 1) return;
+    if (draftRound === lastLeagueNudgeRound.current) return;
+    lastLeagueNudgeRound.current = draftRound;
+    if (espn.pickCount < leagueNudgeMutedUntilPick) return;
+    const parts: string[] = [];
+    if (leagueRanks.fp?.matched) parts.push("FP");
+    if (leagueRanks.ds?.matched) parts.push("DS");
+    setImportMsg(
+      `Round ${draftRound} done — public FP/DS auto-refresh; league ${parts.join("+")} stays frozen until you re-import from synced War Room / cheat sheets.`,
+    );
+  }, [
+    espn.live,
+    espn.pickCount,
+    done,
+    hasLeagueImport,
+    draftRound,
+    leagueNudgeMutedUntilPick,
+    leagueRanks.fp?.matched,
+    leagueRanks.ds?.matched,
+  ]);
+
   const myPicks = userPickOveralls(
     settings.slot,
     settings.teams,
@@ -711,7 +756,7 @@ export function DraftApp() {
               size="sm"
               onClick={() => void refreshRankings("manual")}
               disabled={refreshing}
-              title="Pull public FantasyPros ECR + DraftSharks 3D for your scoring, plus injury flags. Mid-draft auto-refresh uses a lighter ranks-only path. Does not replace league-specific imports."
+              title="Pull public FantasyPros ECR + DraftSharks 3D for your scoring, plus injury flags. Mid-draft auto uses a lighter ranks-only path. Does not replace league-specific imports — use Re-import for those."
             >
               {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               {refreshing ? "Refreshing…" : "Refresh ranks"}
@@ -726,12 +771,52 @@ export function DraftApp() {
               leagueRanks={leagueRanks}
               onApply={applyImport}
               onClear={clearLeagueSource}
+              midDraft={espn.live && !done}
             />
             <SettingsSheet settings={settings} setSettings={setSettings} />
           </div>
         </div>
         {importMsg ? (
-          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
+          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-primary">
+            {importMsg}
+            {showLeagueReimportNudge && /re-import|frozen/i.test(importMsg) ? (
+              <>
+                {" · "}
+                {leagueRanks.fp?.matched ? (
+                  <button
+                    type="button"
+                    className="font-medium underline-offset-2 hover:underline"
+                    onClick={() => openLeagueImport("fp")}
+                  >
+                    Re-import FP
+                  </button>
+                ) : null}
+                {leagueRanks.fp?.matched && leagueRanks.ds?.matched ? " · " : null}
+                {leagueRanks.ds?.matched ? (
+                  <button
+                    type="button"
+                    className="font-medium underline-offset-2 hover:underline"
+                    onClick={() => openLeagueImport("ds")}
+                  >
+                    Re-import DS
+                  </button>
+                ) : null}
+                {" · "}
+                <button
+                  type="button"
+                  className="text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={() => {
+                    setImportMsg(null);
+                    setLeagueNudgeMutedUntilPick(
+                      espn.pickCount + Math.max(1, settings.teams),
+                    );
+                  }}
+                >
+                  dismiss
+                </button>
+              </>
+            ) : null}
+          </p>
         ) : rankOverlay?.lastError ? (
           <p className="border-t border-destructive/30 bg-destructive/5 px-4 py-1.5 text-center text-xs text-destructive">
             Rank refresh failed
@@ -765,9 +850,9 @@ export function DraftApp() {
                     type="button"
                     className="underline-offset-2 hover:underline"
                     onClick={() => setAutoRanks((v) => !v)}
-                    title={`Auto-refresh public FP/DS every ~${Math.round(LIVE_RANK_POLL_MS / 1000)}s and after new picks (throttled ${Math.round(MIN_REFRESH_INTERVAL_MS / 1000)}s). Not league War Room.`}
+                    title={`Auto-refresh public FP ECR + DS 3D every ~${Math.round(LIVE_RANK_POLL_MS / 1000)}s and after new picks (throttled ${Math.round(MIN_REFRESH_INTERVAL_MS / 1000)}s). Not league War Room / supply-demand boards.`}
                   >
-                    {autoRanks ? "auto ranks on" : "auto ranks off"}
+                    {autoRanks ? "auto public ranks on" : "auto public ranks off"}
                   </button>
                 </span>
               </>
@@ -778,12 +863,54 @@ export function DraftApp() {
                 <span className="font-medium text-foreground">League ranks</span>
                 {" · "}
                 {leagueStatus.join(" · ")}
+                <span className="text-muted-foreground">
+                  {" "}
+                  (pinned until re-import)
+                </span>
+                {espn.live ? (
+                  <>
+                    {" · "}
+                    {leagueRanks.fp?.matched ? (
+                      <button
+                        type="button"
+                        className="underline-offset-2 hover:underline"
+                        onClick={() => openLeagueImport("fp")}
+                        title="Paste an updated FantasyPros synced-league cheat sheet"
+                      >
+                        Re-import FP
+                      </button>
+                    ) : null}
+                    {leagueRanks.fp?.matched && leagueRanks.ds?.matched ? " · " : null}
+                    {leagueRanks.ds?.matched ? (
+                      <button
+                        type="button"
+                        className="underline-offset-2 hover:underline"
+                        onClick={() => openLeagueImport("ds")}
+                        title="Paste an updated DraftSharks league War Room board"
+                      >
+                        Re-import DS
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+              </>
+            ) : espn.live ? (
+              <>
+                <span className="font-medium text-foreground">No league import</span>
+                {" · public ECR/3D only · "}
+                <button
+                  type="button"
+                  className="underline-offset-2 hover:underline"
+                  onClick={() => openLeagueImport("fp")}
+                >
+                  Import FP/DS
+                </button>
               </>
             ) : null}
             {rankOverlay?.fetchedAt ? (
               <>
                 {leagueStatus.length > 0 || espn.live ? " · " : null}
-                <span className="font-medium text-foreground">FP/DS</span>
+                <span className="font-medium text-foreground">Public FP/DS</span>
                 {` refreshed ${new Date(rankOverlay.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
                 {rankOverlay.lastSource && rankOverlay.lastSource !== "manual"
                   ? ` · ${rankOverlay.lastSource}`
@@ -1480,6 +1607,7 @@ function ImportDialog({
   leagueRanks,
   onApply,
   onClear,
+  midDraft,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -1490,9 +1618,11 @@ function ImportDialog({
   leagueRanks: LeagueRanks;
   onApply: (source: RankImportSource) => void;
   onClear: (source: RankImportSource) => void;
+  midDraft?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const active = leagueRanks[source];
+  const hasAny = Boolean(leagueRanks.fp?.matched || leagueRanks.ds?.matched);
   const placeholder =
     source === "ds"
       ? "RK,PLAYER,POS\n1,Jahmyr Gibbs,RB\n2,Bijan Robinson,RB"
@@ -1506,8 +1636,17 @@ function ImportDialog({
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => onOpenChange(true)}>
-        <ClipboardPaste /> Import
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onOpenChange(true)}
+        title={
+          midDraft
+            ? "Re-import league FP/DS boards — public Refresh cannot pull login-gated War Room ranks"
+            : "Import league-specific FantasyPros / DraftSharks ranks"
+        }
+      >
+        <ClipboardPaste /> {midDraft && hasAny ? "Re-import" : "Import"}
       </Button>
       <Dialog
         open={open}
@@ -1517,12 +1656,24 @@ function ImportDialog({
       >
         <DialogContent className="max-w-lg sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>League-specific rankings</DialogTitle>
+            <DialogTitle>
+              {midDraft && active ? "Re-import league rankings" : "League-specific rankings"}
+            </DialogTitle>
             <DialogDescription>
               Sync your league on FantasyPros or DraftSharks first, then export or copy that board
-              here. Draft Room cannot log into those sites — public Refresh stays generic ECR / 3D.
+              here. Draft Room cannot log into those sites — auto Refresh only updates public ECR /
+              3D. League columns stay pinned until you paste a fresh export
+              {midDraft ? " (do this mid-draft when War Room re-ranks remaining players)" : ""}.
             </DialogDescription>
           </DialogHeader>
+
+          {midDraft ? (
+            <p className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              Mid-draft: taken players are already filtered from ESPN. Public FP/DS ranks auto-update;
+              your synced league War Room / cheat sheet still needs a fresh paste here for
+              supply/demand-adjusted remaining ranks.
+            </p>
+          ) : null}
 
           <Tabs
             value={source}
@@ -1582,6 +1733,7 @@ function ImportDialog({
                   hour: "numeric",
                   minute: "2-digit",
                 })}
+                {midDraft ? " · re-paste to update" : ""}
               </span>
               <Button variant="ghost" size="sm" onClick={() => onClear(source)}>
                 Clear
@@ -1615,7 +1767,13 @@ function ImportDialog({
             className="min-h-40 w-full rounded-xl border border-input bg-background p-3 font-mono text-xs"
           />
           <Button onClick={() => onApply(source)} disabled={!text.trim()}>
-            {source === "ds" ? "Import DraftSharks ranks" : "Import FantasyPros ranks"}
+            {active
+              ? source === "ds"
+                ? "Re-import DraftSharks ranks"
+                : "Re-import FantasyPros ranks"
+              : source === "ds"
+                ? "Import DraftSharks ranks"
+                : "Import FantasyPros ranks"}
           </Button>
         </DialogContent>
       </Dialog>

@@ -66,9 +66,11 @@ While **Sync ESPN** is connected, Draft Room **auto-refreshes** public FP ECR + 
 - On a ~90s interval while the draft is live
 - Always via the **Refresh ranks** button (full refresh including injuries)
 
-Auto-refresh uses a **ranks-only** upstream path (2 pages) and the server **throttles to at most once per 60s** per scoring mode so we do not hammer FantasyPros / DraftSharks. The header shows last-refreshed time, auto on/off, and refresh errors. Toggle auto with the **auto ranks on/off** control in the status strip.
+Auto-refresh uses a **ranks-only** upstream path (2 pages) and the server **throttles to at most once per 60s** per scoring mode so we do not hammer FantasyPros / DraftSharks. The header shows last-refreshed time, auto on/off, and refresh errors. Toggle auto with the **auto public ranks on/off** control in the status strip.
 
-**Best available live source:** public FantasyPros consensus cheatsheets and DraftSharks ranking tables for your League scoring setting. Those boards update during draft season as experts move players; they are **not** login-gated Draft War Room / league-synced remaining-player boards (those need Import below). League-specific imports still override the matching column when present.
+**What updates automatically:** public FantasyPros consensus cheatsheets and DraftSharks ranking tables for your League scoring setting. Taken players are filtered from ESPN. Those public boards move during draft season as experts update; they are **not** login-gated Draft War Room / league-synced remaining-player boards with your draft’s supply/demand.
+
+**What needs a mid-draft re-import:** league-specific FP/DS columns you pasted earlier stay **pinned** until you paste a fresh export. While ESPN is live, the status strip offers **Re-import FP / Re-import DS**, and after each completed round Draft Room nudges you to refresh those synced boards. The Import button becomes **Re-import** during a live draft when league ranks are loaded.
 
 Manual **Refresh ranks** also pulls injury flags (Out / Q / Watch) from FantasyPros injury news, DraftSharks badges when present, and the public ESPN injury report (no cookies).
 
@@ -95,4 +97,4 @@ DraftSharks does not offer a public CSV for synced-league boards. After you sync
 
 That replaces the **DS** column only.
 
-Imports persist in the browser (localStorage). **Refresh ranks** and mid-draft auto-refresh still update public sheets (and injuries on manual refresh) but **do not wipe** league imports — those keep winning for their column until you clear them in the Import dialog.
+Imports persist in the browser (localStorage). **Refresh ranks** and mid-draft auto-refresh still update public sheets (and injuries on manual refresh) but **do not wipe** league imports — those keep winning for their column until you clear them or **Re-import** a newer export in the Import dialog.
