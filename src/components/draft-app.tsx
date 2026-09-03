@@ -239,34 +239,31 @@ export function DraftApp() {
   const rankOverlay = data.rankOverlay;
   const leagueRanks = data.leagueRanks ?? {};
 
-  const setSettings = useCallback(
-    (next: LeagueSettings) => writeStore({ ...data, settings: next }),
-    [data]
-  );
-  const setPicks = useCallback(
-    (next: DraftPick[] | ((prev: DraftPick[]) => DraftPick[])) => {
-      const picksNext = typeof next === "function" ? next(data.picks ?? EMPTY.picks) : next;
-      writeStore({ ...data, picks: picksNext });
-    },
-    [data]
-  );
-  const setStars = useCallback(
-    (next: string[] | ((prev: string[]) => string[])) => {
-      const starsNext = typeof next === "function" ? next(data.stars ?? EMPTY.stars) : next;
-      writeStore({ ...data, stars: starsNext });
-    },
-    [data]
-  );
+  const setSettings = useCallback((next: LeagueSettings) => {
+    writeStore({ ...dataRef.current, settings: next });
+  }, []);
+  const setPicks = useCallback((next: DraftPick[] | ((prev: DraftPick[]) => DraftPick[])) => {
+    const cur = dataRef.current;
+    const picksNext = typeof next === "function" ? next(cur.picks ?? EMPTY.picks) : next;
+    writeStore({ ...cur, picks: picksNext });
+  }, []);
+  const setStars = useCallback((next: string[] | ((prev: string[]) => string[])) => {
+    const cur = dataRef.current;
+    const starsNext = typeof next === "function" ? next(cur.stars ?? EMPTY.stars) : next;
+    writeStore({ ...cur, stars: starsNext });
+  }, []);
+  /** Always merge from dataRef so ESPN listens cannot clobber a concurrent FP/DS overlay write. */
   const applyEspnPicks = useCallback(
     (nextPicks: DraftPick[], extraPlayers: Player[], settingsPatch?: LeagueSettings) => {
+      const cur = dataRef.current;
       writeStore({
-        ...data,
+        ...cur,
         picks: nextPicks,
         extras: extraPlayers,
-        settings: settingsPatch ?? data.settings,
+        settings: settingsPatch ?? cur.settings,
       });
     },
-    [data]
+    [],
   );
 
   const [query, setQuery] = useState("");
@@ -477,11 +474,12 @@ export function DraftApp() {
       label: source === "ds" ? "League-adjusted DraftSharks" : "League-adjusted FantasyPros",
       live: false,
     };
+    const cur = dataRef.current;
     const nextLeague: LeagueRanks = {
-      ...leagueRanks,
+      ...(cur.leagueRanks ?? {}),
       [source]: entry,
     };
-    writeStore({ ...data, leagueRanks: nextLeague, importText });
+    writeStore({ ...cur, leagueRanks: nextLeague, importText });
     setImportMsg(
       `Loaded ${parsed.matched} ${source === "ds" ? "DraftSharks" : "FantasyPros"} league ranks${
         parsed.unmatched.length ? `. Unmatched: ${parsed.unmatched.slice(0, 6).join(", ")}` : "."
@@ -492,9 +490,10 @@ export function DraftApp() {
   };
 
   const clearLeagueSource = (source: RankImportSource) => {
-    const next = { ...leagueRanks };
+    const cur = dataRef.current;
+    const next = { ...(cur.leagueRanks ?? {}) };
     delete next[source];
-    writeStore({ ...data, leagueRanks: next });
+    writeStore({ ...cur, leagueRanks: next });
     setImportMsg(
       source === "ds"
         ? "Cleared league DraftSharks ranks — board falls back to refreshed / snapshot DS."
@@ -706,7 +705,6 @@ export function DraftApp() {
       if (!payload?.matched || !payload.ts || !payload.patches) return;
       if (payload.ts <= lastTs.current) return;
       if (Object.keys(payload.patches).length === 0) return;
-      lastTs.current = payload.ts;
       const cur = dataRef.current;
       const prev = cur.leagueRanks?.[source];
       if (
@@ -714,8 +712,14 @@ export function DraftApp() {
         prev.importedAt === payload.ts &&
         prev.matched === payload.matched
       ) {
+        lastTs.current = payload.ts;
         return;
       }
+      // Remaining boards shrink mid-draft; never apply a tiny scrape over a solid overlay.
+      if (prev?.matched && payload.matched < Math.min(20, Math.floor(prev.matched * 0.35))) {
+        return;
+      }
+      lastTs.current = payload.ts;
       const entry: LeagueSourceImport = {
         patches: payload.patches,
         matched: payload.matched,

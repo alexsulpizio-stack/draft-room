@@ -494,7 +494,18 @@ function post(picks,meta,err){
     return;
   }
   var sig=picks.length+":"+picks[picks.length-1].overallPickNumber+":"+picks[picks.length-1].playerId+":"+(picks[picks.length-1].playerName||"")+":"+(meta.teams||"")+":"+(meta.leagueId||"");
-  if(sig===lastSig){ badge(picks.length,meta); return; }
+  if(sig===lastSig){
+    badge(picks.length,meta);
+    var nowKeep=Date.now();
+    // Soft heartbeat so listen does not go stale between picks.
+    if(nowKeep-lastBeat<20000) return;
+    lastBeat=nowKeep;
+    postRelay(picks,meta);
+    try{
+      fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({picks:picks,href:location.href,title:document.title,ts:Date.now(),meta:meta}),mode:"cors",keepalive:true}).catch(function(){});
+    }catch(e){}
+    return;
+  }
   postRelay(picks,meta);
   if(sending){ pending={picks:picks,meta:meta}; return; }
   sending=true;

@@ -20,10 +20,19 @@ const STALE_MS = 12 * 60 * 1000;
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const fallbackTeams = Number(url.searchParams.get("teams")) || 12;
+  // Drop foreign scrapes before relay merge so FP/DS pollution cannot be blended
+  // into a later ESPN ntfy snapshot (mergeEspnPicks would otherwise keep bad rows).
+  {
+    const prior = getIngest();
+    const priorHref = prior?.href ?? "";
+    if (prior && priorHref && priorHref !== "paste" && !isAllowedEspnIngestHref(priorHref)) {
+      clearIngest();
+    }
+  }
   await pullRelayIntoIngest();
   let last = getIngest();
   const href = last?.href ?? "";
-  if (last?.picks.length && href !== "paste" && !isAllowedEspnIngestHref(href)) {
+  if (last && href && href !== "paste" && !isAllowedEspnIngestHref(href)) {
     clearIngest();
     last = null;
   }
@@ -63,7 +72,7 @@ export async function GET(req: Request) {
     });
   }
   if (!last.picks.length) {
-    const connected = Boolean(last.href && /espn\.com/i.test(last.href));
+    const connected = Boolean(last.href && isAllowedEspnIngestHref(last.href));
     return NextResponse.json({
       ok: true,
       ingest: false,

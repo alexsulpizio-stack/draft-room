@@ -29,11 +29,12 @@ var pending=null;
 var lastCount=0;
 function badge(n,msg){
   lastCount=n;
-  var el=document.getElementById("draft-room-ranks-badge");
+  var id="draft-room-ranks-badge-"+SRC;
+  var el=document.getElementById(id);
   if(!el){
     el=document.createElement("div");
-    el.id="draft-room-ranks-badge";
-    el.setAttribute("style","position:fixed;z-index:2147483647;right:12px;bottom:12px;background:#0f766e;color:#fff;font:600 12px/1.3 system-ui,sans-serif;padding:10px 14px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.28);max-width:min(360px,90vw);cursor:default");
+    el.id=id;
+    el.setAttribute("style","position:fixed;z-index:2147483647;right:12px;bottom:"+(SRC==="ds"?"56px":"12px")+";background:#0f766e;color:#fff;font:600 12px/1.3 system-ui,sans-serif;padding:10px 14px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.28);max-width:min(360px,90vw);cursor:default");
     document.documentElement.appendChild(el);
   }
   el.textContent=LABEL+" · "+(n||0)+" ranks"+(msg?" · "+msg:"");

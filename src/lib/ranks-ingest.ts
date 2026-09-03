@@ -2,6 +2,22 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { RankImportSource } from "./parse-import";
 
+/** Accept FP/DS live scrapes for the matching source; reject ESPN (and cross-site) pollution. */
+export function isAllowedRanksIngestHref(source: RankImportSource, href: unknown): boolean {
+  if (typeof href !== "string" || !href.trim()) return true;
+  if (href === "paste" || href === "cleared") return true;
+  try {
+    const host = new URL(href).hostname.toLowerCase();
+    if (source === "ds") {
+      return host === "draftsharks.com" || host.endsWith(".draftsharks.com");
+    }
+    return host === "fantasypros.com" || host.endsWith(".fantasypros.com");
+  } catch {
+    if (source === "ds") return /draftsharks\.com/i.test(href);
+    return /fantasypros\.com/i.test(href);
+  }
+}
+
 export type RankIngestRow = {
   rank: number;
   name: string;

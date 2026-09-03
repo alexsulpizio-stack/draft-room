@@ -8,6 +8,7 @@ import {
 import {
   clearRanksIngest,
   getRanksIngest,
+  isAllowedRanksIngestHref,
   setRanksIngestSource,
   type RankIngestRow,
 } from "@/lib/ranks-ingest";
@@ -129,6 +130,22 @@ export async function POST(req: Request) {
     return cors(req, { ok: false, error: "source must be fp or ds." }, 400);
   }
   const source = body.source;
+  const href = typeof body.href === "string" ? body.href : undefined;
+  const previous = getRanksIngest()[source];
+  // Keep FP and DS channels distinct from each other and from ESPN scrapes.
+  if (href && !isAllowedRanksIngestHref(source, href)) {
+    return cors(req, {
+      ok: true,
+      ignoredForeign: true,
+      source,
+      matched: previous?.matched ?? 0,
+      error:
+        source === "ds"
+          ? "DS ranks ingest only accepts draftsharks.com. Use Sync ESPN / Sync FP ranks on those sites."
+          : "FP ranks ingest only accepts fantasypros.com. Use Sync ESPN / Sync DS ranks on those sites.",
+      ts: previous?.ts,
+    });
+  }
   const rows = normalizeRows(body.rows);
   const text =
     typeof body.text === "string" && body.text.trim()
@@ -162,7 +179,7 @@ export async function POST(req: Request) {
     source,
     rows,
     text,
-    href: typeof body.href === "string" ? body.href : undefined,
+    href,
     title: typeof body.title === "string" ? body.title : undefined,
     ts: Date.now(),
     matched: parsed.matched,

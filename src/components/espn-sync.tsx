@@ -335,6 +335,24 @@ export function EspnSync({
         });
         return;
       }
+      // Cookie API must not shrink a healthier room-capture board (practice drafts often
+      // return empty API slots while the bookmarklet already posted names).
+      const held = statusRef.current.pickCount;
+      if (
+        statusRef.current.source === "room-capture" &&
+        held > 0 &&
+        json.picks.length < held &&
+        json.source !== "room-capture"
+      ) {
+        setStatus({
+          live: true,
+          source: "room-capture",
+          pickCount: held,
+          warning: json.warning ?? "Keeping room capture — ESPN API returned fewer picks.",
+          leagueName: liveConn.leagueName,
+        });
+        return;
+      }
       const remapped = remapMappedPicks(json.picks);
       const picks = mappedToDraft(remapped);
       onPicksRef.current(picks, json.extras ?? extrasFromMapped(remapped));
@@ -388,12 +406,27 @@ export function EspnSync({
         if (json.connected || meta.leagueName || meta.leagueId) {
           const label = meta.leagueName || `League ${meta.leagueId}`;
           const nextSettings = patchSettingsFromEspnMeta(settingsRef.current, meta);
+          const switchedLeague = Boolean(
+            meta.leagueId && meta.leagueId !== settingsRef.current.espnLeagueId,
+          );
           const waitSig = `wait:${meta.leagueId ?? ""}:${meta.slot ?? ""}:${meta.teams ?? ""}`;
           // Connected-with-0 is fine before the draft starts. Mid-draft, a transient empty
           // listen (e.g. foreign bookmarklet pollution) must not wipe the board.
-          if (!hadLivePicks && listenSig.current !== waitSig) {
+          // Only clear picks when switching to a different ESPN league.
+          if (switchedLeague && listenSig.current !== waitSig) {
             listenSig.current = waitSig;
             onPicksRef.current([], [], nextSettings);
+          } else if (!hadLivePicks && listenSig.current !== waitSig) {
+            listenSig.current = waitSig;
+            // Apply league meta only — do not clobber local/manual picks with [].
+            setSettings(nextSettings);
+          } else if (hadLivePicks) {
+            // Keep picks; still pick up slot/teamNames if they arrived late.
+            const slotChanged =
+              nextSettings.slot !== settingsRef.current.slot ||
+              nextSettings.teams !== settingsRef.current.teams ||
+              nextSettings.espnLeagueId !== settingsRef.current.espnLeagueId;
+            if (slotChanged) setSettings(nextSettings);
           }
           if (!hadLivePicks) {
             setIngestHint(
@@ -404,6 +437,7 @@ export function EspnSync({
               source: "room-capture",
               pickCount: 0,
               leagueName: label,
+              warning: "Connected · waiting for names",
             });
           } else {
             setIngestHint(
@@ -471,7 +505,7 @@ export function EspnSync({
     } catch {
       /* next tick */
     }
-  }, [setStatus]);
+  }, [setStatus, setSettings]);
 
   useEffect(() => {
     if (!conn?.live) return;
@@ -630,8 +664,12 @@ export function EspnSync({
                   </Badge>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {status.pickCount} picks synced
-                  {status.warning ? ` · ${status.warning}` : ""}
+                  {status.pickCount > 0
+                    ? `${status.pickCount} picks synced`
+                    : status.warning?.includes("waiting for names")
+                      ? "Connected — waiting for player names"
+                      : "Connected — 0 picks yet"}
+                  {status.warning && status.pickCount > 0 ? ` · ${status.warning}` : ""}
                 </p>
               </div>
             ) : null}

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { mergeEspnPicks, type EspnIngestMeta, type EspnRawPick } from "./espn";
+import { isAllowedEspnIngestHref, mergeEspnPicks, type EspnIngestMeta, type EspnRawPick } from "./espn";
 import { setIngest, getIngest, type IngestPayload } from "./espn-ingest";
 
 const TOPIC_PATHS = [
@@ -153,14 +153,17 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
       if (!msg.message) continue;
       const unpacked = unpackRelayMessage(msg.message);
       if (!unpacked) continue;
-      if (!unpacked.href || !/espn\.com/i.test(unpacked.href)) continue;
+      if (!unpacked.href || !isAllowedEspnIngestHref(unpacked.href)) continue;
       if (unpacked.picks.length) {
         if (!best || unpacked.ts >= best.ts) best = unpacked;
       } else if (unpacked.meta || unpacked.href) {
         if (!heartbeat || unpacked.ts >= heartbeat.ts) heartbeat = unpacked;
       }
     }
-    const current = getIngest();
+    const raw = getIngest();
+    // Ignore in-memory foreign scrapes so relay cannot merge ESPN picks onto them.
+    const current =
+      raw && raw.href && raw.href !== "paste" && !isAllowedEspnIngestHref(raw.href) ? null : raw;
     const next = applyRelayToIngest(current, best, heartbeat);
     if (!next) return false;
     const same =

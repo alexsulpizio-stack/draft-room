@@ -322,6 +322,11 @@ assert(isAllowedEspnIngestHref("paste"), "paste href allowed");
 assert(!isAllowedEspnIngestHref("https://draftwizard.fantasypros.com/d/rdr.jsp"), "FP href rejected");
 assert(!isAllowedEspnIngestHref("https://www.draftsharks.com/war-room"), "DS href rejected");
 
+const relaySrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/lib/espn-relay.ts"), "utf8");
+assert(relaySrc.includes("isAllowedEspnIngestHref"), "relay filters with isAllowedEspnIngestHref");
+const listenSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/listen/route.ts"), "utf8");
+assert(listenSrc.includes("Drop foreign scrapes before relay merge") || listenSrc.indexOf("isAllowedEspnIngestHref") !== listenSrc.lastIndexOf("isAllowedEspnIngestHref"), "listen clears foreign before relay");
+
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);
 console.log("sentinel subtitle:", line);

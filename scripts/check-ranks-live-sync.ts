@@ -3,6 +3,7 @@ import { ranksBookmarkletCode, buildRanksBookmarklet } from "../src/lib/ranks-bo
 import {
   clearRanksIngest,
   getRanksIngest,
+  isAllowedRanksIngestHref,
   setRanksIngestSource,
 } from "../src/lib/ranks-ingest";
 import { parseRankingPaste, updatesToPatches } from "../src/lib/parse-import";
@@ -14,6 +15,7 @@ const fpCode = ranksBookmarkletCode("http://127.0.0.1:43173", "fp");
 assert.match(fpCode, /fantasypros\.com/);
 assert.match(fpCode, /\/api\/ranks\/ingest/);
 assert.match(fpCode, /data-player-name/);
+assert.match(fpCode, /draft-room-ranks-badge-\"\+SRC/);
 
 const fpHref = buildRanksBookmarklet("http://127.0.0.1:43173", "fp");
 assert.ok(fpHref.startsWith("javascript:"));
@@ -25,6 +27,14 @@ assert.match(dsHref, /draftsharks\.com/);
 assert.match(dsHref, /example\.preview\.dev/);
 assert.match(dsHref, /\/api\/ranks\/ingest/);
 assert.doesNotMatch(dsHref, /\n/);
+
+assert.equal(isAllowedRanksIngestHref("fp", "https://draftwizard.fantasypros.com/d/rdr.jsp"), true);
+assert.equal(isAllowedRanksIngestHref("fp", "https://www.fantasypros.com/nfl/rankings/"), true);
+assert.equal(isAllowedRanksIngestHref("ds", "https://www.draftsharks.com/war-room"), true);
+assert.equal(isAllowedRanksIngestHref("fp", "https://fantasy.espn.com/football/draft"), false);
+assert.equal(isAllowedRanksIngestHref("ds", "https://draftwizard.fantasypros.com/d/rdr.jsp"), false);
+assert.equal(isAllowedRanksIngestHref("fp", "https://www.draftsharks.com/war-room"), false);
+assert.equal(isAllowedRanksIngestHref("fp", undefined), true);
 
 const text = "RK,PLAYER,POS,TEAM\n1,Ja'Marr Chase,WR,CIN\n2,Jahmyr Gibbs,RB,DET\n3,Bijan Robinson,RB,ATL\n4,Justin Jefferson,WR,MIN\n5,Saquon Barkley,RB,PHI\n6,CeeDee Lamb,WR,DAL\n7,Amon-Ra St. Brown,WR,DET\n8,Puka Nacua,WR,LAR";
 const parsed = parseRankingPaste(text, "fp");

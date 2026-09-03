@@ -94,8 +94,27 @@ export async function POST(req: Request) {
     picks = parseEspnPickLog(body.text, meta.teams || 12);
   }
   const previous = getIngest();
+  // Empty body while we already have picks = keep-alive heartbeat. Refresh ts/meta; never wipe.
   if (!picks.length && previous?.picks.length) {
-    return cors(req, { ok: true, count: previous.picks.length, ignoredEmpty: true, meta: previous.meta });
+    const nextMeta = {
+      ...previous.meta,
+      ...meta,
+      // Keep prior reason blanked so UI does not flash "0 filled slots" over a live board.
+      reason: undefined,
+    };
+    setIngest({
+      picks: previous.picks,
+      href: href || previous.href,
+      title: typeof body.title === "string" ? body.title : previous.title,
+      ts: Date.now(),
+      meta: nextMeta,
+    });
+    return cors(req, {
+      ok: true,
+      count: previous.picks.length,
+      heartbeat: true,
+      meta: nextMeta,
+    });
   }
   setIngest({
     picks,
