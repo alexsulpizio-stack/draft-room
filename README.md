@@ -64,6 +64,16 @@ Works with **any** live ESPN draft — JFL 28, another league, a mock, or a prac
 
 **Only click Sync ESPN on fantasy.espn.com.** Clicking it on FantasyPros or DraftSharks scrapes those UIs into the ESPN channel, clears room capture, and can wipe the board. Use **Sync FP ranks** / **Sync DS ranks** for those sites.
 
+### Cloud preview / Cursor Agent
+
+Bookmarklets bake the Draft Room origin they were copied from. If that origin is `http://127.0.0.1:43173` while you open Draft Room via a **Cursor cloud preview**, ESPN/FP/DS tabs on your PC cannot POST to the VM’s localhost.
+
+1. Open Draft Room on the **share / preview URL** (not only an SSH localhost forward), **or** paste that public URL in the Sync ESPN sheet / Import panel and click **Save**, **or** set `DRAFT_ROOM_PUBLIC_URL` (also accepted as `NEXT_PUBLIC_DRAFT_ROOM_URL`) and restart the server.
+2. Re-copy **Sync ESPN**, **Sync FP ranks**, and **Sync DS ranks** and reinstall the bookmarks.
+3. ESPN still has a public ntfy relay (`ntfy.sh/drjfl28jackal`) as a fallback when direct ingest fails. FP/DS ranks have **no** relay — they require a reachable origin.
+
+True local-only drafts on the same machine as the server can keep using `127.0.0.1:43173`.
+
 1. In Draft Room, click **Sync ESPN** (that chip only opens this help). Copy the script. Chrome → Ctrl+Shift+B → right-click the bookmarks bar → Add page → Name: `Sync ESPN` → URL: paste the script → Save. Delete any older Sync ESPN bookmark first.
 2. Open the ESPN draft tab and click that bookmark. A green badge should appear on ESPN. Leave the tab open. Picks also go through a public relay (`ntfy.sh/drjfl28jackal`) so ESPN on your PC can reach a Cloud preview.
 3. If the badge says **0 picks** but names are already on the ESPN board (common in practice drafts — ESPN leaves `playerId` empty), copy the pick history from ESPN and paste it as step 3 in Draft Room. Lines like `1.01 Jahmyr Gibbs` or `1.02 Puka Nacua, WR, LAR` work.

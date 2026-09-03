@@ -201,6 +201,48 @@ assert(
   "bookmarklet prefers public preview over loopback",
 );
 
+const { resolveEspnBookmarkOrigin, requestPublicOrigin, configuredPublicOrigin, originDiagnostics } =
+  require("../src/lib/espn") as typeof import("../src/lib/espn");
+assert(
+  resolveEspnBookmarkOrigin("http://127.0.0.1:43173", "https://share.example.com") ===
+    "https://share.example.com",
+  "resolveEspnBookmarkOrigin prefers public",
+);
+assert(
+  resolveEspnBookmarkOrigin("https://share.example.com", "http://127.0.0.1:43173") ===
+    "https://share.example.com",
+  "resolveEspnBookmarkOrigin keeps non-loopback page",
+);
+
+{
+  const prev = process.env.DRAFT_ROOM_PUBLIC_URL;
+  process.env.DRAFT_ROOM_PUBLIC_URL = "https://env-preview.example.com";
+  const fromEnv = requestPublicOrigin(
+    new Request("http://127.0.0.1:43173/api/espn/listen", {
+      headers: { host: "127.0.0.1:43173" },
+    }),
+  );
+  assert(
+    fromEnv === "https://env-preview.example.com",
+    `loopback Host uses DRAFT_ROOM_PUBLIC_URL, got ${fromEnv}`,
+  );
+  const forwarded = requestPublicOrigin(
+    new Request("http://127.0.0.1:43173/api/espn/listen", {
+      headers: {
+        host: "127.0.0.1:43173",
+        "x-forwarded-host": "forwarded.example.com",
+        "x-forwarded-proto": "https",
+      },
+    }),
+  );
+  assert(
+    forwarded === "https://forwarded.example.com",
+    `x-forwarded-host wins over env when present, got ${forwarded}`,
+  );
+  if (prev === undefined) delete process.env.DRAFT_ROOM_PUBLIC_URL;
+  else process.env.DRAFT_ROOM_PUBLIC_URL = prev;
+}
+
 setIngest({
   picks: [{ overallPickNumber: 1, playerId: 3116406, teamId: 1, playerName: "Jahmyr Gibbs" }],
   ts: Date.now(),
@@ -294,6 +336,38 @@ const staleIgnored = applyRelayToIngest(
 );
 assert(staleIgnored?.picks.length === 0 && staleIgnored.href === "cleared", "stale ntfy picks do not undo a clear");
 
+const replayAfterForeign = applyRelayToIngest(
+  { picks: [], ts: 0, href: "cleared" },
+  {
+    picks: [{ overallPickNumber: 1, playerId: 0, teamId: 1, playerName: "Ja'Marr Chase" }],
+    href: "https://fantasy.espn.com/football/draft",
+    ts: 100,
+  },
+  null,
+);
+assert(
+  replayAfterForeign?.picks.length === 1 && replayAfterForeign.picks[0].playerName === "Ja'Marr Chase",
+  "ts=0 foreign clear allows ESPN relay replay",
+);
+
+const richerOlder = applyRelayToIngest(
+  {
+    picks: [{ overallPickNumber: 1, playerId: 0, teamId: 1, playerName: "Ja'Marr Chase" }],
+    ts: 500,
+    href: "https://fantasy.espn.com/football/draft",
+  },
+  {
+    picks: [
+      { overallPickNumber: 1, playerId: 0, teamId: 1, playerName: "Ja'Marr Chase" },
+      { overallPickNumber: 2, playerId: 0, teamId: 2, playerName: "Bijan Robinson" },
+    ],
+    href: "https://fantasy.espn.com/football/draft",
+    ts: 100,
+  },
+  null,
+);
+assert(richerOlder?.picks.length === 2, "older richer relay grows past newer partial ingest");
+
 assert(cleanPickLogName("Ja'Marr Chase WR CIN") === "Ja'Marr Chase", "strip pos/team from scraped name");
 assert(cleanPickLogName("Ja'Marr Chase, WR, CIN") === "Ja'Marr Chase", "comma pos/team after name");
 assert(cleanPickLogName("Chase, Ja'Marr") === "Ja'Marr Chase", "flip last, first");
@@ -326,12 +400,17 @@ const relaySrc = require("node:fs").readFileSync(require("node:path").join(__dir
 assert(relaySrc.includes("isAllowedEspnIngestHref"), "relay filters with isAllowedEspnIngestHref");
 const listenSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/listen/route.ts"), "utf8");
 assert(listenSrc.includes("Drop foreign scrapes before relay merge") || listenSrc.indexOf("isAllowedEspnIngestHref") !== listenSrc.lastIndexOf("isAllowedEspnIngestHref"), "listen clears foreign before relay");
+assert(listenSrc.includes("allow-replay"), "listen foreign clear allows relay replay");
+assert(listenSrc.includes("stale"), "listen reports stale without wiping picks");
 
 const bmKeep = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/lib/espn-bookmarklet.ts"), "utf8");
 assert(bmKeep.includes("nowKeep-lastBeat") || bmKeep.includes("Soft heartbeat"), "bookmarklet soft-heartbeat when sig unchanged");
 
 const ingestSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/ingest/route.ts"), "utf8");
 assert(ingestSrc.includes("heartbeat: true"), "ingest empty-with-prior refreshes as heartbeat");
+
+void configuredPublicOrigin;
+void originDiagnostics;
 
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);

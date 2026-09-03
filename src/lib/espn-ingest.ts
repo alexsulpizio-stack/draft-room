@@ -63,7 +63,16 @@ export function getIngest(): IngestPayload | null {
   return last;
 }
 
-export function clearIngest() {
-  last = { picks: [], ts: Date.now(), href: "cleared" };
+/**
+ * Clear in-memory + disk ingest.
+ * - `block-relay` (default): stamp now so older ntfy snapshots cannot resurrect picks after an intentional clear.
+ * - `allow-replay`: ts=0 so ESPN relay can re-apply after foreign (FP/DS) pollution was wiped.
+ */
+export function clearIngest(mode: "block-relay" | "allow-replay" = "block-relay") {
+  last = {
+    picks: [],
+    ts: mode === "allow-replay" ? 0 : Date.now(),
+    href: "cleared",
+  };
   writeDisk(last);
 }

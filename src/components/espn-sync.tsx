@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/sheet";
 import { pickOwner } from "@/lib/draft";
 import {
-  bookmarkletOrigin,
   buildBookmarklet,
   espnDraftRoomUrl,
   ESPN_LIVE_LOBBY,
@@ -26,11 +25,17 @@ import {
   parseEspnPickLog,
   patchSettingsFromEspnMeta,
   remapMappedPicks,
+  resolveEspnBookmarkOrigin,
   stubFromEspn,
   type EspnIngestMeta,
   type EspnLeagueInfo,
   type MappedEspnPick,
 } from "@/lib/espn";
+import {
+  envPublicOrigin,
+  readStoredPublicOrigin,
+  writeStoredPublicOrigin,
+} from "@/lib/public-origin";
 import type { DraftPick, LeagueSettings, Player } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BUILD_LABEL, buildTitle } from "@/lib/version";
@@ -175,7 +180,10 @@ export function EspnSync({
   const [advanced, setAdvanced] = useState(false);
   const [ingestHint, setIngestHint] = useState<string | null>(null);
   const [publicOrigin, setPublicOrigin] = useState("");
+  const [storedPublicOrigin, setStoredPublicOrigin] = useState("");
+  const [publicOriginDraft, setPublicOriginDraft] = useState("");
   const [relayUrl, setRelayUrl] = useState("");
+  const [loopbackHostMismatch, setLoopbackHostMismatch] = useState(false);
 
   const connRaw = useSyncExternalStore(subscribeConn, getConnSnap, () => "");
   const conn = useMemo(() => {
@@ -197,18 +205,44 @@ export function EspnSync({
     settingsRef.current = settings;
   });
 
+  useEffect(() => {
+    const stored = readStoredPublicOrigin();
+    if (stored) {
+      setStoredPublicOrigin(stored);
+      setPublicOriginDraft(stored);
+    } else {
+      const env = envPublicOrigin();
+      if (env) setPublicOriginDraft(env);
+    }
+  }, []);
+
   const pageOrigin = useSyncExternalStore(
     () => () => {},
     () => window.location.origin,
     () => "",
   );
-  const origin = bookmarkletOrigin(pageOrigin, publicOrigin) || pageOrigin || "http://127.0.0.1:43173";
+  const reachablePublic =
+    storedPublicOrigin ||
+    envPublicOrigin() ||
+    (publicOrigin && !isLoopbackOrigin(publicOrigin) ? publicOrigin : "") ||
+    "";
+  const origin =
+    resolveEspnBookmarkOrigin(pageOrigin, reachablePublic || publicOrigin) ||
+    pageOrigin ||
+    "http://127.0.0.1:43173";
   const bookmarkHref = buildBookmarklet(origin, RELAY_URL);
   const ingestUrl = origin ? `${origin}/api/espn/ingest` : "";
   const ingestIsLocal = origin ? isLoopbackOrigin(origin) : false;
+  const pageIsLocal = pageOrigin ? isLoopbackOrigin(pageOrigin) : false;
   const draftRoomUrl = settings.espnLeagueId
     ? espnDraftRoomUrl(settings.espnLeagueId, season)
     : "";
+
+  const savePublicOrigin = () => {
+    const next = publicOriginDraft.trim().replace(/\/$/, "");
+    writeStoredPublicOrigin(next);
+    setStoredPublicOrigin(next);
+  };
 
   const persistAuth = (next: Auth) => {
     localStorage.setItem(AUTH_KEY, JSON.stringify(next));
@@ -383,6 +417,7 @@ export function EspnSync({
       });
       const json = (await res.json()) as {
         ingest?: boolean;
+        stale?: boolean;
         count?: number;
         href?: string;
         picks?: MappedEspnPick[];
@@ -393,12 +428,16 @@ export function EspnSync({
         ingestUrl?: string;
         relayUrl?: string;
         connected?: boolean;
+        loopbackHostMismatch?: boolean;
       };
       if (typeof json.publicOrigin === "string" && json.publicOrigin) {
         setPublicOrigin(json.publicOrigin);
       }
       if (typeof json.relayUrl === "string" && json.relayUrl) {
         setRelayUrl(json.relayUrl);
+      }
+      if (typeof json.loopbackHostMismatch === "boolean") {
+        setLoopbackHostMismatch(json.loopbackHostMismatch);
       }
       if (!json.ingest || !json.picks?.length) {
         const meta = json.meta ?? {};
@@ -501,6 +540,9 @@ export function EspnSync({
         source: "room-capture",
         pickCount: json.picks.length,
         leagueName: label,
+        warning: json.stale
+          ? "Room capture quiet — re-click Sync ESPN on fantasy.espn.com (relay still holds picks)."
+          : undefined,
       });
     } catch {
       /* next tick */
@@ -525,13 +567,23 @@ export function EspnSync({
 
   useEffect(() => {
     void fetch("/api/espn/ingest", { cache: "no-store" })
-      .then((r) => r.json() as Promise<{ publicOrigin?: string; relayUrl?: string }>)
+      .then(
+        (r) =>
+          r.json() as Promise<{
+            publicOrigin?: string;
+            relayUrl?: string;
+            loopbackHostMismatch?: boolean;
+          }>,
+      )
       .then((json) => {
         if (typeof json.publicOrigin === "string" && json.publicOrigin) {
           setPublicOrigin(json.publicOrigin);
         }
         if (typeof json.relayUrl === "string" && json.relayUrl) {
           setRelayUrl(json.relayUrl);
+        }
+        if (typeof json.loopbackHostMismatch === "boolean") {
+          setLoopbackHostMismatch(json.loopbackHostMismatch);
         }
       })
       .catch(() => {
@@ -706,15 +758,60 @@ export function EspnSync({
                 ) : null}
                 {relayUrl ? (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Live picks also go through a public relay so ESPN on your PC can reach this board.
+                    Live picks also go through a public relay ({relayUrl.replace("https://", "")}) so
+                    ESPN on your PC can reach this board even when direct POST fails.
                   </p>
                 ) : null}
-                {ingestIsLocal ? (
-                  <p className="mt-1 text-xs text-destructive">
-                    Direct ingest is localhost. Re-drag this chip so the bookmark includes the relay
-                    — otherwise ESPN on your PC cannot reach Draft Room.
-                  </p>
+                {ingestIsLocal || loopbackHostMismatch ? (
+                  <div className="mt-3 space-y-2 rounded-xl border-2 border-destructive bg-destructive/15 p-3 text-sm text-destructive">
+                    <p className="font-semibold leading-snug">
+                      {loopbackHostMismatch
+                        ? "Cloud preview mismatch: this page is not on localhost, but Sync scripts still point at 127.0.0.1."
+                        : "Bookmarklets will POST to localhost — unreachable from Cursor cloud."}
+                    </p>
+                    <p className="text-xs leading-relaxed text-destructive/90">
+                      You are opening Draft Room on a Cloud Agent / preview. ESPN, FantasyPros, and
+                      DraftSharks tabs on <span className="font-medium">your</span> PC cannot reach{" "}
+                      <span className="font-mono">127.0.0.1:43173</span> on the remote VM. Sync ESPN
+                      can still work via the ntfy relay (green badge + picks here). Sync FP/DS ranks
+                      need a reachable public Draft Room URL — they have no relay.
+                    </p>
+                    <ol className="list-decimal space-y-1 pl-4 text-xs leading-relaxed text-destructive/90">
+                      <li>
+                        Paste your Cursor share / preview URL below (or set{" "}
+                        <span className="font-mono">DRAFT_ROOM_PUBLIC_URL</span> and restart).
+                      </li>
+                      <li>Click Save, then re-copy Sync ESPN / Sync FP / Sync DS scripts.</li>
+                      <li>
+                        Delete old bookmarks, paste the new scripts as bookmark URLs, click them on
+                        the correct sites (ESPN only for Sync ESPN).
+                      </li>
+                    </ol>
+                  </div>
                 ) : null}
+                {(ingestIsLocal || pageIsLocal || loopbackHostMismatch) && (
+                  <div className="mt-3 space-y-2 rounded-xl border border-border bg-muted/40 p-3">
+                    <Label htmlFor="draft-room-public-url" className="text-xs">
+                      Public Draft Room URL (Cloud preview)
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      <Input
+                        id="draft-room-public-url"
+                        value={publicOriginDraft}
+                        onChange={(e) => setPublicOriginDraft(e.target.value)}
+                        placeholder="https://your-cursor-preview-host"
+                        className="h-8 flex-1 font-mono text-xs"
+                      />
+                      <Button type="button" size="sm" variant="secondary" onClick={savePublicOrigin}>
+                        Save
+                      </Button>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      Saved in this browser. After Save, re-copy the Sync scripts so they bake the
+                      public origin. True local-only drafts on this same machine can leave this blank.
+                    </p>
+                  </div>
+                )}
                 <Button
                   type="button"
                   size="sm"

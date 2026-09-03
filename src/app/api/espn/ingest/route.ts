@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isAllowedEspnIngestHref, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
+import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isAllowedEspnIngestHref, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, originDiagnostics, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 import { getRelayTopic, relayUrl } from "@/lib/espn-relay";
 
@@ -32,6 +32,8 @@ export async function OPTIONS(req: Request) {
 export async function GET(req: Request) {
   const last = getIngest();
   const topic = getRelayTopic();
+  const publicOrigin = requestPublicOrigin(req);
+  const origin = originDiagnostics(req);
   return cors(req, {
     ok: true,
     picks: last?.picks ?? [],
@@ -39,10 +41,15 @@ export async function GET(req: Request) {
     ts: last?.ts ?? null,
     href: last?.href,
     meta: last?.meta,
-    publicOrigin: requestPublicOrigin(req),
-    ingestUrl: `${requestPublicOrigin(req)}/api/espn/ingest`,
+    publicOrigin,
+    ingestUrl: `${publicOrigin}/api/espn/ingest`,
     relayTopic: topic,
     relayUrl: relayUrl(topic),
+    configuredOrigin: origin.configuredOrigin,
+    requestHostOrigin: origin.requestHostOrigin,
+    loopback: origin.loopback,
+    loopbackRisk: origin.loopbackRisk,
+    loopbackHostMismatch: origin.loopbackHostMismatch,
   });
 }
 

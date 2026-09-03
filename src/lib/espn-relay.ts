@@ -86,7 +86,7 @@ export function unpackRelayMessage(raw: string): UnpackedRelay | null {
 
 type NtfyLine = { event?: string; message?: string; time?: number };
 
-/** Merge a polled ntfy snapshot into ingest. Never apply older messages after a clear. Never shrink picks. */
+/** Merge a polled ntfy snapshot into ingest. Never apply older messages after an intentional clear. Never shrink picks. */
 export function applyRelayToIngest(
   current: IngestPayload | null,
   best: UnpackedRelay | null,
@@ -94,12 +94,15 @@ export function applyRelayToIngest(
 ): IngestPayload | null {
   let next = current;
   const currentTs = current?.ts ?? 0;
+  const curLen = current?.picks.length ?? 0;
   if (best) {
-    const stale = currentTs > 0 && best.ts < currentTs;
-    if (!stale) {
+    // Intentional clear stamps ts>0 with href=cleared. Foreign clears use ts=0 so relay can replay.
+    const intentionalClear = curLen === 0 && current?.href === "cleared" && currentTs > 0;
+    const blockedByClear = intentionalClear && best.ts < currentTs;
+    if (!blockedByClear) {
       const merged = mergeEspnPicks(current?.picks ?? [], best.picks);
-      const grew = merged.length > (current?.picks.length ?? 0);
-      const sameOrNewer = best.ts >= currentTs && merged.length >= (current?.picks.length ?? 0);
+      const grew = merged.length > curLen;
+      const sameOrNewer = best.ts >= currentTs && merged.length >= curLen;
       if (grew || sameOrNewer) {
         next = {
           picks: merged,

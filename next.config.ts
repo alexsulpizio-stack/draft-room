@@ -21,6 +21,16 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_GIT_SHA: gitSha,
     NEXT_PUBLIC_BUILD_TIME: buildTime,
     NEXT_PUBLIC_BUILD_LABEL: buildLabel,
+    // Bake configured public URL into the client bundle when set (Cloud preview).
+    ...(process.env.DRAFT_ROOM_PUBLIC_URL
+      ? { NEXT_PUBLIC_DRAFT_ROOM_URL: process.env.DRAFT_ROOM_PUBLIC_URL }
+      : {}),
+    ...(process.env.NEXT_PUBLIC_DRAFT_ROOM_URL
+      ? { NEXT_PUBLIC_DRAFT_ROOM_URL: process.env.NEXT_PUBLIC_DRAFT_ROOM_URL }
+      : {}),
+    ...(process.env.NEXT_PUBLIC_APP_URL
+      ? { NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL }
+      : {}),
   },
   allowedDevOrigins: [
     "127.0.0.1",
@@ -29,6 +39,12 @@ const nextConfig: NextConfig = {
     "*.espn.com",
     "fantasy.espn.com",
     "www.espn.com",
+    "fantasypros.com",
+    "*.fantasypros.com",
+    "draftwizard.fantasypros.com",
+    "draftsharks.com",
+    "*.draftsharks.com",
+    "www.draftsharks.com",
   ],
 };
 

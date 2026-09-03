@@ -3,7 +3,9 @@ import {
   bookmarkletOrigin,
   ingestCorsHeaders,
   isLoopbackOrigin,
+  originDiagnostics,
   requestPublicOrigin,
+  resolveEspnBookmarkOrigin,
 } from "@/lib/espn";
 import {
   clearRanksIngest,
@@ -72,7 +74,8 @@ export async function GET(req: Request) {
   const store = getRanksIngest();
   const publicOrigin = requestPublicOrigin(req);
   const pageOrigin = url.searchParams.get("origin") || publicOrigin;
-  const origin = bookmarkletOrigin(pageOrigin, publicOrigin) || publicOrigin;
+  const origin = resolveEspnBookmarkOrigin(pageOrigin, publicOrigin) || publicOrigin;
+  const diag = originDiagnostics(req, pageOrigin);
   return cors(req, {
     ok: true,
     fp: store.fp
@@ -101,7 +104,11 @@ export async function GET(req: Request) {
       fp: buildRanksBookmarklet(origin, "fp"),
       ds: buildRanksBookmarklet(origin, "ds"),
     },
-    loopback: isLoopbackOrigin(origin),
+    loopback: isLoopbackOrigin(origin) || diag.loopback,
+    loopbackRisk: diag.loopbackRisk || isLoopbackOrigin(origin),
+    loopbackHostMismatch: diag.loopbackHostMismatch,
+    configuredOrigin: diag.configuredOrigin,
+    requestHostOrigin: diag.requestHostOrigin,
   });
 }
 

@@ -1300,15 +1300,51 @@ export function isLoopbackOrigin(origin: string): boolean {
   }
 }
 
-/** Prefer a public preview host when the page itself is 127.0.0.1 (Cloud Agent). */
-export function bookmarkletOrigin(pageOrigin: string, publicOrigin?: string): string {
-  const page = (pageOrigin || "").replace(/\/$/, "");
-  const pub = (publicOrigin || "").replace(/\/$/, "");
-  if (isLoopbackOrigin(page) && pub && !isLoopbackOrigin(pub)) return pub;
-  return page;
+/** Normalize an origin URL (trim trailing slash). Returns "" if empty/invalid-looking. */
+export function normalizeOrigin(origin: string | undefined | null): string {
+  const raw = (origin || "").trim().replace(/\/$/, "");
+  if (!raw) return "";
+  try {
+    const u = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    if (!u.hostname) return "";
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "";
+  }
 }
 
-export function requestPublicOrigin(req: Request): string {
+/**
+ * Operator-configured public Draft Room URL (Cloud preview / share link).
+ * Used when the request Host is loopback but ESPN/FP/DS run on another machine.
+ */
+export function configuredPublicOrigin(): string {
+  return normalizeOrigin(
+    process.env.DRAFT_ROOM_PUBLIC_URL ||
+      process.env.NEXT_PUBLIC_DRAFT_ROOM_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "",
+  );
+}
+
+/**
+ * Prefer a reachable (non-loopback) origin for bookmarklets.
+ * Order: non-loopback page → non-loopback public → page → public.
+ */
+export function resolveEspnBookmarkOrigin(pageOrigin: string, publicOrigin?: string): string {
+  const page = normalizeOrigin(pageOrigin);
+  const pub = normalizeOrigin(publicOrigin);
+  if (page && !isLoopbackOrigin(page)) return page;
+  if (pub && !isLoopbackOrigin(pub)) return pub;
+  return page || pub;
+}
+
+/** @deprecated Prefer resolveEspnBookmarkOrigin — kept for existing imports. */
+export function bookmarkletOrigin(pageOrigin: string, publicOrigin?: string): string {
+  return resolveEspnBookmarkOrigin(pageOrigin, publicOrigin);
+}
+
+/** Host as seen on the incoming request (x-forwarded-* aware), before env override. */
+export function requestHostOrigin(req: Request): string {
   const url = new URL(req.url);
   const proto = (req.headers.get("x-forwarded-proto") || url.protocol.replace(":", "") || "http")
     .split(",")[0]
@@ -1317,13 +1353,68 @@ export function requestPublicOrigin(req: Request): string {
     .split(",")[0]
     .trim();
   if (!host) return "";
-  return `${proto}://${host}`.replace(/\/$/, "");
+  return normalizeOrigin(`${proto}://${host}`);
+}
+
+/**
+ * Reachable Draft Room origin for bookmarklets / ingest URLs.
+ * Prefers configured public URL when the request Host is loopback (Cloud Agent VM).
+ */
+export function requestPublicOrigin(req: Request): string {
+  const hostOrigin = requestHostOrigin(req);
+  const configured = configuredPublicOrigin();
+  if (hostOrigin && !isLoopbackOrigin(hostOrigin)) return hostOrigin;
+  if (configured && !isLoopbackOrigin(configured)) return configured;
+  return hostOrigin || configured;
+}
+
+export type OriginDiagnostics = {
+  publicOrigin: string;
+  requestHostOrigin: string;
+  configuredOrigin: string;
+  loopback: boolean;
+  /** True when Host is public/preview but we would still bake loopback without overrides. */
+  loopbackHostMismatch: boolean;
+  /** True when bookmarklets would POST to localhost (unreachable from ESPN/FP/DS on another machine). */
+  loopbackRisk: boolean;
+};
+
+export function originDiagnostics(req: Request, pageOrigin?: string): OriginDiagnostics {
+  const requestHost = requestHostOrigin(req);
+  const configured = configuredPublicOrigin();
+  const publicOrigin = requestPublicOrigin(req);
+  const baked = resolveEspnBookmarkOrigin(pageOrigin || publicOrigin, publicOrigin);
+  const loopback = isLoopbackOrigin(baked);
+  const hostIsLoopback = !requestHost || isLoopbackOrigin(requestHost);
+  return {
+    publicOrigin,
+    requestHostOrigin: requestHost,
+    configuredOrigin: configured,
+    loopback,
+    loopbackHostMismatch: loopback && !hostIsLoopback,
+    loopbackRisk: loopback,
+  };
+}
+
+export function isRanksBrowserOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return (
+      host === "fantasypros.com" ||
+      host.endsWith(".fantasypros.com") ||
+      host === "draftsharks.com" ||
+      host.endsWith(".draftsharks.com")
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function ingestCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") ?? "";
-  const espn = isEspnBrowserOrigin(origin);
-  // Echo the browser Origin so ESPN pages can POST ingest (ACAO cannot be * with credentials).
+  const trusted =
+    isEspnBrowserOrigin(origin) || isRanksBrowserOrigin(origin);
+  // Echo the browser Origin so ESPN/FP/DS pages can POST ingest (ACAO cannot be * with credentials).
   const allowOrigin = origin && origin !== "null" ? origin : "*";
   const headers: Record<string, string> = {
     "Access-Control-Allow-Origin": allowOrigin,
@@ -1333,7 +1424,7 @@ export function ingestCorsHeaders(req: Request): Record<string, string> {
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
-  if (espn || (allowOrigin !== "*" && origin)) {
+  if (trusted || (allowOrigin !== "*" && origin)) {
     headers["Access-Control-Allow-Credentials"] = "true";
   }
   return headers;

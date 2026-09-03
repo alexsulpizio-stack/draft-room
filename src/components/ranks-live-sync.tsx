@@ -11,7 +11,14 @@ import {
 } from "react";
 import { Check, Copy, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { bookmarkletOrigin, isLoopbackOrigin } from "@/lib/espn";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { isLoopbackOrigin, resolveEspnBookmarkOrigin } from "@/lib/espn";
+import {
+  envPublicOrigin,
+  readStoredPublicOrigin,
+  writeStoredPublicOrigin,
+} from "@/lib/public-origin";
 import { buildRanksBookmarklet } from "@/lib/ranks-bookmarklet";
 import type { RankImportSource } from "@/lib/parse-import";
 import { cn } from "@/lib/utils";
@@ -72,22 +79,47 @@ export function RanksLiveSyncPanel({
 }) {
   const [pageOrigin, setPageOrigin] = useState("");
   const [publicOrigin, setPublicOrigin] = useState("");
+  const [storedPublicOrigin, setStoredPublicOrigin] = useState("");
+  const [publicOriginDraft, setPublicOriginDraft] = useState("");
+  const [loopbackHostMismatch, setLoopbackHostMismatch] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     setPageOrigin(window.location.origin);
+    const stored = readStoredPublicOrigin();
+    if (stored) {
+      setStoredPublicOrigin(stored);
+      setPublicOriginDraft(stored);
+    } else {
+      const env = envPublicOrigin();
+      if (env) setPublicOriginDraft(env);
+    }
     void fetch("/api/ranks/ingest", { cache: "no-store" })
-      .then((r) => r.json() as Promise<{ publicOrigin?: string }>)
+      .then(
+        (r) =>
+          r.json() as Promise<{
+            publicOrigin?: string;
+            loopbackHostMismatch?: boolean;
+          }>,
+      )
       .then((json) => {
         if (typeof json.publicOrigin === "string" && json.publicOrigin) {
           setPublicOrigin(json.publicOrigin);
+        }
+        if (typeof json.loopbackHostMismatch === "boolean") {
+          setLoopbackHostMismatch(json.loopbackHostMismatch);
         }
       })
       .catch(() => {});
   }, []);
 
+  const reachablePublic =
+    storedPublicOrigin ||
+    envPublicOrigin() ||
+    (publicOrigin && !isLoopbackOrigin(publicOrigin) ? publicOrigin : "") ||
+    "";
   const origin =
-    bookmarkletOrigin(pageOrigin, publicOrigin) ||
+    resolveEspnBookmarkOrigin(pageOrigin, reachablePublic || publicOrigin) ||
     pageOrigin ||
     "http://127.0.0.1:43173";
   const bookmarkHref = useMemo(
@@ -109,6 +141,12 @@ export function RanksLiveSyncPanel({
     } catch {
       /* user can select textarea */
     }
+  };
+
+  const savePublicOrigin = () => {
+    const next = publicOriginDraft.trim().replace(/\/$/, "");
+    writeStoredPublicOrigin(next);
+    setStoredPublicOrigin(next);
   };
 
   return (
@@ -170,12 +208,35 @@ export function RanksLiveSyncPanel({
           should show rank count. Leave it open — Draft Room applies updates automatically.
         </li>
       </ol>
-      {loopback ? (
-        <p className="text-[11px] text-destructive">
-          Ingest points at localhost. If {source === "ds" ? "DraftSharks" : "FantasyPros"} runs on
-          another machine than this Draft Room, re-copy after opening Draft Room on a public
-          preview URL so the bookmark can reach it.
-        </p>
+      {loopback || loopbackHostMismatch ? (
+        <div className="space-y-2 rounded-xl border-2 border-destructive bg-destructive/15 p-3 text-sm text-destructive">
+          <p className="font-semibold leading-snug">
+            {loopbackHostMismatch
+              ? "Cloud preview mismatch: scripts still point at localhost."
+              : "Ranks sync will POST to localhost — unreachable from Cursor cloud."}
+          </p>
+          <p className="text-xs leading-relaxed text-destructive/90">
+            Sync FP/DS have no ntfy relay. Paste your Cursor share / preview URL, Save, then re-copy
+            this script so it posts to a URL your browser can reach.
+          </p>
+          <div className="space-y-1">
+            <Label htmlFor={`ranks-public-url-${source}`} className="text-xs text-destructive">
+              Public Draft Room URL
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              <Input
+                id={`ranks-public-url-${source}`}
+                value={publicOriginDraft}
+                onChange={(e) => setPublicOriginDraft(e.target.value)}
+                placeholder="https://your-cursor-preview-host"
+                className="h-8 flex-1 border-destructive/40 font-mono text-xs"
+              />
+              <Button type="button" size="sm" variant="secondary" onClick={savePublicOrigin}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
