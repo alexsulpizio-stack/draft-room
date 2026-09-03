@@ -1,25 +1,22 @@
 import { NextResponse } from "next/server";
 import {
-  bookmarkletOrigin,
   ingestCorsHeaders,
   isLoopbackOrigin,
   originDiagnostics,
   requestPublicOrigin,
   resolveEspnBookmarkOrigin,
 } from "@/lib/espn";
+import { commitRankScrape } from "@/lib/ranks-apply";
 import {
   clearRanksIngest,
   getRanksIngest,
   isAllowedRanksIngestHref,
-  setRanksIngestSource,
   type RankIngestRow,
 } from "@/lib/ranks-ingest";
-import {
-  parseRankingPaste,
-  updatesToPatches,
-  type RankImportSource,
-} from "@/lib/parse-import";
+import { pullRanksRelayIntoIngest, ranksRelayUrl } from "@/lib/ranks-relay";
 import { buildRanksBookmarklet } from "@/lib/ranks-bookmarklet";
+import { RANKS_RELAY_URL } from "@/lib/relay-urls";
+import type { RankImportSource } from "@/lib/parse-import";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,14 +48,6 @@ function normalizeRows(raw: unknown): RankIngestRow[] {
   return out;
 }
 
-function rowsToText(rows: RankIngestRow[]): string {
-  const lines = ["RK,PLAYER,POS,TEAM"];
-  for (const r of rows) {
-    lines.push([r.rank, r.name, r.pos ?? "", r.team ?? ""].join(","));
-  }
-  return lines.join("\n");
-}
-
 export async function OPTIONS(req: Request) {
   return new NextResponse(null, { status: 204, headers: ingestCorsHeaders(req) });
 }
@@ -71,11 +60,13 @@ export async function GET(req: Request) {
   } else if (clear === "1" || clear === "all") {
     clearRanksIngest();
   }
+  await pullRanksRelayIntoIngest();
   const store = getRanksIngest();
   const publicOrigin = requestPublicOrigin(req);
   const pageOrigin = url.searchParams.get("origin") || publicOrigin;
   const origin = resolveEspnBookmarkOrigin(pageOrigin, publicOrigin) || publicOrigin;
   const diag = originDiagnostics(req, pageOrigin);
+  const relay = ranksRelayUrl();
   return cors(req, {
     ok: true,
     fp: store.fp
@@ -100,9 +91,10 @@ export async function GET(req: Request) {
       : null,
     publicOrigin,
     ingestUrl: `${publicOrigin}/api/ranks/ingest`,
+    relayUrl: relay,
     bookmarklets: {
-      fp: buildRanksBookmarklet(origin, "fp"),
-      ds: buildRanksBookmarklet(origin, "ds"),
+      fp: buildRanksBookmarklet(origin, "fp", RANKS_RELAY_URL),
+      ds: buildRanksBookmarklet(origin, "ds", RANKS_RELAY_URL),
     },
     loopback: isLoopbackOrigin(origin) || diag.loopback,
     loopbackRisk: diag.loopbackRisk || isLoopbackOrigin(origin),
@@ -139,7 +131,6 @@ export async function POST(req: Request) {
   const source = body.source;
   const href = typeof body.href === "string" ? body.href : undefined;
   const previous = getRanksIngest()[source];
-  // Keep FP and DS channels distinct from each other and from ESPN scrapes.
   if (href && !isAllowedRanksIngestHref(source, href)) {
     return cors(req, {
       ok: true,
@@ -154,68 +145,37 @@ export async function POST(req: Request) {
     });
   }
   const rows = normalizeRows(body.rows);
-  const text =
-    typeof body.text === "string" && body.text.trim()
-      ? body.text
-      : rows.length
-        ? rowsToText(rows)
-        : "";
-  if (!text.trim()) {
-    return cors(req, { ok: false, error: "No ranking rows." }, 400);
-  }
-
-  const parsed = parseRankingPaste(text, source);
-  if (parsed.matched < 5) {
+  const result = commitRankScrape({
+    source,
+    rows,
+    text: typeof body.text === "string" ? body.text : undefined,
+    href,
+    title: typeof body.title === "string" ? body.title : undefined,
+    ts: typeof body.ts === "number" ? body.ts : undefined,
+  });
+  if (!result.ok && !result.applied) {
+    const status = result.error?.startsWith("Only matched") ? 422 : 400;
     return cors(
       req,
       {
         ok: false,
-        error: `Only matched ${parsed.matched} players — open the live remaining board and try again.`,
-        matched: parsed.matched,
-        unmatched: parsed.unmatched,
+        error: result.error,
+        matched: result.matched,
+        unmatched: result.unmatched,
       },
-      422,
+      status,
     );
   }
-
-  // Guard against a tiny partial scrape wiping a solid league overlay.
-  if (
-    previous?.matched &&
-    parsed.matched < Math.min(20, Math.floor(previous.matched * 0.35))
-  ) {
-    return cors(req, {
-      ok: true,
-      ignoredWeak: true,
-      source,
-      matched: previous.matched,
-      incoming: parsed.matched,
-      ts: previous.ts,
-      error: `Kept prior ${source.toUpperCase()} overlay (${previous.matched}) — incoming scrape only matched ${parsed.matched}.`,
-    });
-  }
-
-  const label =
-    source === "ds"
-      ? "Live DraftSharks War Room sync"
-      : "Live FantasyPros Draft Assistant sync";
-  const payload = {
-    source,
-    rows,
-    text,
-    href,
-    title: typeof body.title === "string" ? body.title : undefined,
-    ts: Date.now(),
-    matched: parsed.matched,
-    patches: updatesToPatches(parsed.updates),
-    unmatched: parsed.unmatched,
-    label,
-  };
-  setRanksIngestSource(payload);
   return cors(req, {
     ok: true,
+    applied: result.applied,
+    ignoredWeak: result.ignoredWeak,
+    ignoredForeign: result.ignoredForeign,
     source,
-    matched: parsed.matched,
-    unmatched: parsed.unmatched,
-    ts: payload.ts,
+    matched: result.matched,
+    unmatched: result.unmatched,
+    incoming: result.incoming,
+    ts: result.ts,
+    error: result.error,
   });
 }

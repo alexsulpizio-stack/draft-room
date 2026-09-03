@@ -20,6 +20,7 @@ import {
   writeStoredPublicOrigin,
 } from "@/lib/public-origin";
 import { buildRanksBookmarklet } from "@/lib/ranks-bookmarklet";
+import { RANKS_RELAY_URL } from "@/lib/relay-urls";
 import type { RankImportSource } from "@/lib/parse-import";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +83,7 @@ export function RanksLiveSyncPanel({
   const [storedPublicOrigin, setStoredPublicOrigin] = useState("");
   const [publicOriginDraft, setPublicOriginDraft] = useState("");
   const [loopbackHostMismatch, setLoopbackHostMismatch] = useState(false);
+  const [relayUrl, setRelayUrl] = useState(RANKS_RELAY_URL);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -99,12 +101,16 @@ export function RanksLiveSyncPanel({
         (r) =>
           r.json() as Promise<{
             publicOrigin?: string;
+            relayUrl?: string;
             loopbackHostMismatch?: boolean;
           }>,
       )
       .then((json) => {
         if (typeof json.publicOrigin === "string" && json.publicOrigin) {
           setPublicOrigin(json.publicOrigin);
+        }
+        if (typeof json.relayUrl === "string" && json.relayUrl) {
+          setRelayUrl(json.relayUrl);
         }
         if (typeof json.loopbackHostMismatch === "boolean") {
           setLoopbackHostMismatch(json.loopbackHostMismatch);
@@ -123,8 +129,8 @@ export function RanksLiveSyncPanel({
     pageOrigin ||
     "http://127.0.0.1:43173";
   const bookmarkHref = useMemo(
-    () => buildRanksBookmarklet(origin, source),
-    [origin, source],
+    () => buildRanksBookmarklet(origin, source, relayUrl || RANKS_RELAY_URL),
+    [origin, source, relayUrl],
   );
   const loopback = isLoopbackOrigin(origin);
   const label = source === "ds" ? "Sync DS ranks" : "Sync FP ranks";
@@ -168,7 +174,9 @@ export function RanksLiveSyncPanel({
         Chrome extensions (FP Side Assistant / DS Sync sidebar on ESPN) stay private to those
         plugins — Draft Room cannot read them. Keep the full {hostHint} open in another tab and
         click this bookmark there. It scrapes the visible remaining board and posts ranks here
-        every few seconds.
+        every few seconds (direct ingest when reachable, otherwise the ntfy relay{" "}
+        <span className="font-mono">{(relayUrl || RANKS_RELAY_URL).replace("https://", "")}</span>
+        ).
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <BookmarkletAnchor
@@ -209,33 +217,43 @@ export function RanksLiveSyncPanel({
         </li>
       </ol>
       {loopback || loopbackHostMismatch ? (
-        <div className="space-y-2 rounded-xl border-2 border-destructive bg-destructive/15 p-3 text-sm text-destructive">
+        <div className="space-y-2 rounded-xl border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
           <p className="font-semibold leading-snug">
-            {loopbackHostMismatch
-              ? "Cloud preview mismatch: scripts still point at localhost."
-              : "Ranks sync will POST to localhost — unreachable from Cursor cloud."}
+            Direct POST is localhost — {label} still syncs through the relay.
           </p>
-          <p className="text-xs leading-relaxed text-destructive/90">
-            Sync FP/DS have no ntfy relay. Paste your Cursor share / preview URL, Save, then re-copy
-            this script so it posts to a URL your browser can reach.
+          <p className="text-xs leading-relaxed opacity-90">
+            FantasyPros / DraftSharks tabs on your PC cannot reach{" "}
+            <span className="font-mono">127.0.0.1:43173</span> on the Cursor VM. The new script
+            posts ranks to ntfy the same way Sync ESPN does. Click {label} on the full{" "}
+            {source === "ds" ? "DraftSharks" : "FantasyPros"} tab, wait for the teal badge (it may
+            say “via relay”), and this column updates. You do not need a public / share URL.
           </p>
-          <div className="space-y-1">
-            <Label htmlFor={`ranks-public-url-${source}`} className="text-xs text-destructive">
-              Public Draft Room URL
-            </Label>
-            <div className="flex flex-wrap gap-2">
-              <Input
-                id={`ranks-public-url-${source}`}
-                value={publicOriginDraft}
-                onChange={(e) => setPublicOriginDraft(e.target.value)}
-                placeholder="https://your-cursor-preview-host"
-                className="h-8 flex-1 border-destructive/40 font-mono text-xs"
-              />
-              <Button type="button" size="sm" variant="secondary" onClick={savePublicOrigin}>
-                Save
-              </Button>
+          <p className="text-xs leading-relaxed opacity-90">
+            Delete the old {label} bookmark and paste the script above as the new URL after this
+            update.
+          </p>
+          <details className="rounded-lg border border-amber-500/30 bg-background/60 p-2">
+            <summary className="cursor-pointer text-xs font-medium">
+              Optional: bake a public Draft Room URL
+            </summary>
+            <div className="mt-2 space-y-1">
+              <Label htmlFor={`ranks-public-url-${source}`} className="text-xs">
+                Public Draft Room URL
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  id={`ranks-public-url-${source}`}
+                  value={publicOriginDraft}
+                  onChange={(e) => setPublicOriginDraft(e.target.value)}
+                  placeholder="https://your-cursor-preview-host"
+                  className="h-8 flex-1 font-mono text-xs"
+                />
+                <Button type="button" size="sm" variant="secondary" onClick={savePublicOrigin}>
+                  Save
+                </Button>
+              </div>
             </div>
-          </div>
+          </details>
         </div>
       ) : null}
     </div>

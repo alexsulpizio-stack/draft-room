@@ -1,14 +1,26 @@
+import { RANKS_RELAY_URL } from "./relay-urls";
+
+export { RANKS_RELAY_URL };
+
 /**
  * FantasyPros / DraftSharks live-ranks bookmarklet.
  * Runs on draftwizard.fantasypros.com, fantasypros.com, or draftsharks.com —
  * NOT on ESPN extension sidebars (those are isolated / cross-origin).
+ * Always posts to ntfy (RANKS_RELAY_URL) so Cursor cloud / localhost-forward
+ * Draft Room can receive ranks when direct POST to 127.0.0.1 fails.
  */
-export function ranksBookmarkletCode(origin: string, source: "fp" | "ds"): string {
+export function ranksBookmarkletCode(
+  origin: string,
+  source: "fp" | "ds",
+  relayUrl = RANKS_RELAY_URL,
+): string {
   const O = JSON.stringify(origin.replace(/\/$/, ""));
   const SRC = JSON.stringify(source);
+  const RELAY = JSON.stringify(relayUrl);
   return String.raw`(function(){
 var O=${O};
 var SRC=${SRC};
+var RELAY=${RELAY};
 var POLL=6000;
 var LABEL=SRC==="ds"?"Sync DS ranks":"Sync FP ranks";
 var host=(location.hostname||"").toLowerCase();
@@ -207,23 +219,68 @@ function rowsToText(rows){
   }
   return lines.join("\n");
 }
+function packChunks(rows){
+  var MAX=3200, t=Date.now(), href=location.href, parts=[], i=0;
+  while(i<rows.length){
+    var take=Math.min(80, rows.length-i);
+    while(take>6){
+      var slice=rows.slice(i,i+take);
+      var packed=JSON.stringify({v:2,s:SRC,t:t,h:href,i:parts.length,n:0,r:slice.map(function(r){return [r.rank,r.name,r.pos||"",r.team||""];})});
+      if(packed.length<=MAX) break;
+      take=Math.ceil(take/2);
+    }
+    var use=Math.max(1,take);
+    parts.push(rows.slice(i,i+use));
+    i+=use;
+  }
+  var n=parts.length, chunks=[];
+  for(var c=0;c<parts.length;c++){
+    chunks.push(JSON.stringify({v:2,s:SRC,t:t,h:href,i:c,n:n,r:parts[c].map(function(r){return [r.rank,r.name,r.pos||"",r.team||""];})}));
+  }
+  return chunks;
+}
+function postRelay(rows){
+  if(!RELAY||!rows||!rows.length) return Promise.resolve(false);
+  var chunks=packChunks(rows);
+  var i=0;
+  function next(){
+    if(i>=chunks.length) return Promise.resolve(true);
+    var body=chunks[i++];
+    return fetch(RELAY,{method:"POST",headers:{"Content-Type":"text/plain"},body:body,mode:"cors",keepalive:true}).then(function(r){
+      if(!r.ok) throw new Error("ntfy "+r.status);
+      return next();
+    });
+  }
+  return next().then(function(){return true;},function(){return false;});
+}
 function flush(){
   if(sending||!pending) return;
-  var body=pending;
+  var job=pending;
   pending=null;
   sending=true;
-  fetch(O+"/api/ranks/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:body,mode:"cors",keepalive:true}).then(function(r){
-    sending=false;
+  var local=fetch(O+"/api/ranks/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:job.body,mode:"cors",keepalive:true}).then(function(r){
     if(!r.ok) throw new Error("HTTP "+r.status);
     return r.json();
-  }).then(function(json){
-    badge((json&&json.matched)||lastCount, json&&json.ok? "live":"posted");
-    flush();
-  }).catch(function(){
-    sending=false;
-    badge(lastCount,"retry");
-    flush();
   });
+  var relay=postRelay(job.rows);
+  function done(localJson, viaRelay){
+    sending=false;
+    if(localJson && localJson.ok){
+      badge((localJson.matched)||lastCount, "live");
+    } else if(viaRelay){
+      badge(lastCount, "via relay");
+    } else {
+      badge(lastCount, "retry");
+    }
+    flush();
+  }
+  var localJson=null, viaRelay=false, left=2;
+  function tick(){
+    left-=1;
+    if(left<=0) done(localJson, viaRelay);
+  }
+  local.then(function(json){ localJson=json; tick(); }, function(){ tick(); });
+  relay.then(function(ok){ viaRelay=!!ok; tick(); }, function(){ tick(); });
 }
 function post(rows){
   if(!rows||rows.length<5){
@@ -234,7 +291,7 @@ function post(rows){
   if(sig===lastSig){ badge(rows.length,"live"); return; }
   lastSig=sig;
   var payload=JSON.stringify({source:SRC,rows:rows,text:rowsToText(rows),href:location.href,title:document.title,ts:Date.now()});
-  pending=payload;
+  pending={body:payload,rows:rows};
   badge(rows.length,"sending");
   flush();
 }
@@ -306,6 +363,10 @@ badge(0,"watching");
 })();`;
 }
 
-export function buildRanksBookmarklet(origin: string, source: "fp" | "ds"): string {
-  return `javascript:${ranksBookmarkletCode(origin, source).replace(/\n/g, "")}`;
+export function buildRanksBookmarklet(
+  origin: string,
+  source: "fp" | "ds",
+  relayUrl = RANKS_RELAY_URL,
+): string {
+  return `javascript:${ranksBookmarkletCode(origin, source, relayUrl).replace(/\n/g, "")}`;
 }

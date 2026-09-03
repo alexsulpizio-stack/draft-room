@@ -2,15 +2,16 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { isAllowedEspnIngestHref, mergeEspnPicks, type EspnIngestMeta, type EspnRawPick } from "./espn";
 import { setIngest, getIngest, type IngestPayload } from "./espn-ingest";
+import { ESPN_RELAY_TOPIC, NTFY_HOST } from "./relay-urls";
 
 const TOPIC_PATHS = [
   `${process.cwd()}/.data/espn-relay-topic`,
   "/tmp/draft-room-espn-relay-topic",
 ] as const;
 
-export const NTFY_HOST = "https://ntfy.sh";
+export { NTFY_HOST };
 /** Fixed so the bookmarklet is valid on first paint — never javascript:void(0). */
-export const STABLE_RELAY_TOPIC = "drjfl28jackal";
+export const STABLE_RELAY_TOPIC = ESPN_RELAY_TOPIC;
 
 function writeTopic(topic: string) {
   for (const file of TOPIC_PATHS) {

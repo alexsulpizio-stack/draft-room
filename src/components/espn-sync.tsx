@@ -36,13 +36,13 @@ import {
   readStoredPublicOrigin,
   writeStoredPublicOrigin,
 } from "@/lib/public-origin";
+import { ESPN_RELAY_URL } from "@/lib/relay-urls";
 import type { DraftPick, LeagueSettings, Player } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BUILD_LABEL, buildTitle } from "@/lib/version";
 
 const AUTH_KEY = "draft-room-espn-auth";
 const CONN_KEY = "draft-room-espn-conn";
-const RELAY_URL = "https://ntfy.sh/drjfl28jackal";
 
 type Auth = { swid: string; espnS2: string };
 type Conn = {
@@ -230,7 +230,7 @@ export function EspnSync({
     resolveEspnBookmarkOrigin(pageOrigin, reachablePublic || publicOrigin) ||
     pageOrigin ||
     "http://127.0.0.1:43173";
-  const bookmarkHref = buildBookmarklet(origin, RELAY_URL);
+  const bookmarkHref = buildBookmarklet(origin, ESPN_RELAY_URL);
   const ingestUrl = origin ? `${origin}/api/espn/ingest` : "";
   const ingestIsLocal = origin ? isLoopbackOrigin(origin) : false;
   const pageIsLocal = pageOrigin ? isLoopbackOrigin(pageOrigin) : false;
@@ -756,61 +756,57 @@ export function EspnSync({
                     Ingest URL: {ingestUrl}
                   </p>
                 ) : null}
-                {relayUrl ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Live picks also go through a public relay ({relayUrl.replace("https://", "")}) so
-                    ESPN on your PC can reach this board even when direct POST fails.
-                  </p>
-                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Live picks go through a public relay (
+                  {(relayUrl || ESPN_RELAY_URL).replace("https://", "")}) so ESPN on your PC can
+                  reach this board when Draft Room is on Cursor cloud / localhost forward. Direct
+                  POST is optional.
+                </p>
                 {ingestIsLocal || loopbackHostMismatch ? (
-                  <div className="mt-3 space-y-2 rounded-xl border-2 border-destructive bg-destructive/15 p-3 text-sm text-destructive">
+                  <div className="mt-3 space-y-2 rounded-xl border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
                     <p className="font-semibold leading-snug">
-                      {loopbackHostMismatch
-                        ? "Cloud preview mismatch: this page is not on localhost, but Sync scripts still point at 127.0.0.1."
-                        : "Bookmarklets will POST to localhost — unreachable from Cursor cloud."}
+                      Bookmarklets target localhost — ESPN still syncs through the relay.
                     </p>
-                    <p className="text-xs leading-relaxed text-destructive/90">
-                      You are opening Draft Room on a Cloud Agent / preview. ESPN, FantasyPros, and
-                      DraftSharks tabs on <span className="font-medium">your</span> PC cannot reach{" "}
-                      <span className="font-mono">127.0.0.1:43173</span> on the remote VM. Sync ESPN
-                      can still work via the ntfy relay (green badge + picks here). Sync FP/DS ranks
-                      need a reachable public Draft Room URL — they have no relay.
+                    <p className="text-xs leading-relaxed opacity-90">
+                      Cursor forwards Draft Room as{" "}
+                      <span className="font-mono">127.0.0.1:43173</span>. ESPN on your PC cannot POST to
+                      the remote VM. That is expected. Click <span className="font-medium">Sync ESPN</span>{" "}
+                      on fantasy.espn.com, wait for the <span className="font-medium">green badge</span>,
+                      and picks show up here via ntfy. You do not need a public / share URL.
                     </p>
-                    <ol className="list-decimal space-y-1 pl-4 text-xs leading-relaxed text-destructive/90">
-                      <li>
-                        Paste your Cursor share / preview URL below (or set{" "}
-                        <span className="font-mono">DRAFT_ROOM_PUBLIC_URL</span> and restart).
-                      </li>
-                      <li>Click Save, then re-copy Sync ESPN / Sync FP / Sync DS scripts.</li>
-                      <li>
-                        Delete old bookmarks, paste the new scripts as bookmark URLs, click them on
-                        the correct sites (ESPN only for Sync ESPN).
-                      </li>
-                    </ol>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      After this update: delete old Sync ESPN / FP / DS bookmarks, copy the new scripts,
+                      paste them as bookmark URLs, then click each on the matching site.
+                    </p>
                   </div>
                 ) : null}
                 {(ingestIsLocal || pageIsLocal || loopbackHostMismatch) && (
-                  <div className="mt-3 space-y-2 rounded-xl border border-border bg-muted/40 p-3">
-                    <Label htmlFor="draft-room-public-url" className="text-xs">
-                      Public Draft Room URL (Cloud preview)
-                    </Label>
-                    <div className="flex flex-wrap gap-2">
-                      <Input
-                        id="draft-room-public-url"
-                        value={publicOriginDraft}
-                        onChange={(e) => setPublicOriginDraft(e.target.value)}
-                        placeholder="https://your-cursor-preview-host"
-                        className="h-8 flex-1 font-mono text-xs"
-                      />
-                      <Button type="button" size="sm" variant="secondary" onClick={savePublicOrigin}>
-                        Save
-                      </Button>
+                  <details className="mt-3 rounded-xl border border-border bg-muted/40 p-3">
+                    <summary className="cursor-pointer text-xs font-medium">
+                      Optional: bake a public Draft Room URL (skip relay)
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <Label htmlFor="draft-room-public-url" className="text-xs">
+                        Public Draft Room URL
+                      </Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          id="draft-room-public-url"
+                          value={publicOriginDraft}
+                          onChange={(e) => setPublicOriginDraft(e.target.value)}
+                          placeholder="https://your-cursor-preview-host"
+                          className="h-8 flex-1 font-mono text-xs"
+                        />
+                        <Button type="button" size="sm" variant="secondary" onClick={savePublicOrigin}>
+                          Save
+                        </Button>
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        Only if you have a reachable share/preview host. After Save, re-copy the Sync
+                        scripts. Leave blank for Cursor cloud — relay is enough.
+                      </p>
                     </div>
-                    <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      Saved in this browser. After Save, re-copy the Sync scripts so they bake the
-                      public origin. True local-only drafts on this same machine can leave this blank.
-                    </p>
-                  </div>
+                  </details>
                 )}
                 <Button
                   type="button"

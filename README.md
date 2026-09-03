@@ -66,16 +66,24 @@ Works with **any** live ESPN draft — JFL 28, another league, a mock, or a prac
 
 ### Cloud preview / Cursor Agent
 
-Bookmarklets bake the Draft Room origin they were copied from. If that origin is `http://127.0.0.1:43173` while you open Draft Room via a **Cursor cloud preview**, ESPN/FP/DS tabs on your PC cannot POST to the VM’s localhost.
+Cursor Desktop forwards Draft Room as `http://127.0.0.1:43173` on **your** PC. ESPN, FantasyPros, and DraftSharks tabs cannot POST to the remote VM’s localhost. **You do not need a public / share URL.**
 
-1. Open Draft Room on the **share / preview URL** (not only an SSH localhost forward), **or** paste that public URL in the Sync ESPN sheet / Import panel and click **Save**, **or** set `DRAFT_ROOM_PUBLIC_URL` (also accepted as `NEXT_PUBLIC_DRAFT_ROOM_URL`) and restart the server.
-2. Re-copy **Sync ESPN**, **Sync FP ranks**, and **Sync DS ranks** and reinstall the bookmarks.
-3. ESPN still has a public ntfy relay (`ntfy.sh/drjfl28jackal`) as a fallback when direct ingest fails. FP/DS ranks have **no** relay — they require a reachable origin.
+All three bookmarklets post to a public ntfy relay, and Draft Room polls that relay:
 
-True local-only drafts on the same machine as the server can keep using `127.0.0.1:43173`.
+| Bookmark | Click on | Relay |
+| --- | --- | --- |
+| Sync ESPN | fantasy.espn.com draft tab | `ntfy.sh/drjfl28jackal` |
+| Sync FP ranks | fantasypros.com / Draft Wizard | `ntfy.sh/drjfl28jackal-ranks` |
+| Sync DS ranks | draftsharks.com War Room | `ntfy.sh/drjfl28jackal-ranks` |
+
+Direct POST to Draft Room still happens when that origin is reachable (true local `next dev` on the same machine). On Cursor cloud it fails silently; the relay is the path that works.
+
+After every Draft Room update: **delete** old Sync ESPN / FP / DS bookmarks, **Copy script**, paste as the bookmark URL (React strips `javascript:` from drag), then click each on the matching site. Green ESPN badge / teal FP·DS badge (may say “via relay”) means the scrape is running.
+
+Optional: if you have a reachable share/preview host, paste it under **Optional: bake a public Draft Room URL** (or set `DRAFT_ROOM_PUBLIC_URL`) and re-copy scripts so they skip the relay. True local-only drafts on the same machine can ignore this.
 
 1. In Draft Room, click **Sync ESPN** (that chip only opens this help). Copy the script. Chrome → Ctrl+Shift+B → right-click the bookmarks bar → Add page → Name: `Sync ESPN` → URL: paste the script → Save. Delete any older Sync ESPN bookmark first.
-2. Open the ESPN draft tab and click that bookmark. A green badge should appear on ESPN. Leave the tab open. Picks also go through a public relay (`ntfy.sh/drjfl28jackal`) so ESPN on your PC can reach a Cloud preview.
+2. Open the ESPN draft tab and click that bookmark. A green badge should appear on ESPN. Leave the tab open. Picks go through `ntfy.sh/drjfl28jackal`.
 3. If the badge says **0 picks** but names are already on the ESPN board (common in practice drafts — ESPN leaves `playerId` empty), copy the pick history from ESPN and paste it as step 3 in Draft Room. Lines like `1.01 Jahmyr Gibbs` or `1.02 Puka Nacua, WR, LAR` work.
 
 Draft Room reads league ID, season, team count, league name, draft type, and your slot (`teamId`) from that page, then marks those players taken on the board.
@@ -125,7 +133,7 @@ Channels stay separate: **Sync ESPN** → `/api/espn/ingest` (fantasy.espn.com o
 1. **Sync FP ranks** — click on `draftwizard.fantasypros.com` / FantasyPros Draft Assistant or cheat sheet.
 2. **Sync DS ranks** — click on `draftsharks.com` Draft War Room (or league rankings).
 
-A teal badge on that page shows how many ranks were scraped. Draft Room polls `/api/ranks/ingest` and overlays those ranks onto the FP or DS column (same as paste import, but live as the board re-ranks). Reinstall the bookmark after Draft Room updates (same rule as Sync ESPN).
+A teal badge on that page shows how many ranks were scraped (it may say **via relay** on Cursor cloud). Draft Room polls `/api/ranks/ingest`, which also pulls `ntfy.sh/drjfl28jackal-ranks`, and overlays those ranks onto the FP or DS column. Reinstall the bookmark after Draft Room updates (same rule as Sync ESPN).
 
 Fallback remains CSV / paste import below.
 

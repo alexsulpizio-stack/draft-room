@@ -16,6 +16,9 @@ assert.match(fpCode, /fantasypros\.com/);
 assert.match(fpCode, /\/api\/ranks\/ingest/);
 assert.match(fpCode, /data-player-name/);
 assert.match(fpCode, /draft-room-ranks-badge-\"\+SRC/);
+assert.match(fpCode, /ntfy\.sh\/drjfl28jackal-ranks/);
+assert.match(fpCode, /packChunks/);
+assert.match(fpCode, /via relay/);
 
 const fpHref = buildRanksBookmarklet("http://127.0.0.1:43173", "fp");
 assert.ok(fpHref.startsWith("javascript:"));
