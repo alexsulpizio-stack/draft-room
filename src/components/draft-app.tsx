@@ -71,6 +71,7 @@ import type { DraftPick, DraftType, Injury, LeagueSettings, Player, Position } f
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PlayerSubline, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
+import { RanksLiveSyncPanel } from "@/components/ranks-live-sync";
 import { matchByName, mergeBoardWithEspnExtras } from "@/lib/espn";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
@@ -80,6 +81,8 @@ type LeagueSourceImport = {
   matched: number;
   importedAt: number;
   label?: string;
+  /** True when last update came from Sync FP/DS bookmarklet ingest. */
+  live?: boolean;
 };
 
 type LeagueRanks = {
@@ -315,14 +318,21 @@ export function DraftApp() {
   const leagueStatus = useMemo(() => {
     const parts: string[] = [];
     if (leagueRanks.fp?.matched) {
-      parts.push(`FP league ${leagueRanks.fp.matched}`);
+      parts.push(
+        `FP league ${leagueRanks.fp.matched}${leagueRanks.fp.live ? " live" : ""}`,
+      );
     }
     if (leagueRanks.ds?.matched) {
-      parts.push(`DS league ${leagueRanks.ds.matched}`);
+      parts.push(
+        `DS league ${leagueRanks.ds.matched}${leagueRanks.ds.live ? " live" : ""}`,
+      );
     }
     return parts;
   }, [leagueRanks]);
   const hasLeagueImport = Boolean(leagueRanks.fp?.matched || leagueRanks.ds?.matched);
+  const hasLiveLeagueSync = Boolean(leagueRanks.fp?.live || leagueRanks.ds?.live);
+  const lastLiveFpTs = useRef(0);
+  const lastLiveDsTs = useRef(0);
   const byId = useMemo(() => new Map(board.map((p) => [p.id, p])), [board]);
   const overall = picks.length + 1;
   const totalPicks = settings.teams * settings.rounds;
@@ -465,6 +475,7 @@ export function DraftApp() {
       matched: parsed.matched,
       importedAt: Date.now(),
       label: source === "ds" ? "League-adjusted DraftSharks" : "League-adjusted FantasyPros",
+      live: false,
     };
     const nextLeague: LeagueRanks = {
       ...leagueRanks,
@@ -660,22 +671,107 @@ export function DraftApp() {
     if (draftRound === lastLeagueNudgeRound.current) return;
     lastLeagueNudgeRound.current = draftRound;
     if (espn.pickCount < leagueNudgeMutedUntilPick) return;
+    if (hasLiveLeagueSync) return;
     const parts: string[] = [];
     if (leagueRanks.fp?.matched) parts.push("FP");
     if (leagueRanks.ds?.matched) parts.push("DS");
     setImportMsg(
-      `Round ${draftRound} done — public FP/DS auto-refresh; league ${parts.join("+")} stays frozen until you re-import from synced War Room / cheat sheets.`,
+      `Round ${draftRound} done — public FP/DS auto-refresh; league ${parts.join("+")} stays frozen until you Sync FP/DS ranks (bookmarklet on War Room / Draft Assistant) or re-paste.`,
     );
   }, [
     espn.live,
     espn.pickCount,
     done,
     hasLeagueImport,
+    hasLiveLeagueSync,
     draftRound,
     leagueNudgeMutedUntilPick,
     leagueRanks.fp?.matched,
     leagueRanks.ds?.matched,
   ]);
+
+  /** Pull league ranks posted by Sync FP / Sync DS bookmarklets. */
+  useEffect(() => {
+    let cancelled = false;
+    const applyLive = (
+      source: RankImportSource,
+      payload: {
+        matched?: number;
+        ts?: number;
+        label?: string;
+        patches?: Record<string, RankPatch>;
+      } | null,
+      lastTs: { current: number },
+    ) => {
+      if (!payload?.matched || !payload.ts || !payload.patches) return;
+      if (payload.ts <= lastTs.current) return;
+      if (Object.keys(payload.patches).length === 0) return;
+      lastTs.current = payload.ts;
+      const cur = dataRef.current;
+      const prev = cur.leagueRanks?.[source];
+      if (
+        prev?.live &&
+        prev.importedAt === payload.ts &&
+        prev.matched === payload.matched
+      ) {
+        return;
+      }
+      const entry: LeagueSourceImport = {
+        patches: payload.patches,
+        matched: payload.matched,
+        importedAt: payload.ts,
+        label:
+          payload.label ??
+          (source === "ds"
+            ? "Live DraftSharks War Room sync"
+            : "Live FantasyPros Draft Assistant sync"),
+        live: true,
+      };
+      writeStore({
+        ...cur,
+        leagueRanks: { ...(cur.leagueRanks ?? {}), [source]: entry },
+      });
+      setImportMsg(
+        `Live ${source === "ds" ? "DraftSharks" : "FantasyPros"} ranks · ${payload.matched} players from bookmarklet sync.`,
+      );
+      setLeagueNudgeMutedUntilPick(
+        (dataRef.current.picks?.length ?? 0) + Math.max(1, settingsRef.current.teams),
+      );
+    };
+
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/ranks/ingest", { cache: "no-store" });
+        const json = (await res.json()) as {
+          ok?: boolean;
+          fp?: {
+            matched?: number;
+            ts?: number;
+            label?: string;
+            patches?: Record<string, RankPatch>;
+          } | null;
+          ds?: {
+            matched?: number;
+            ts?: number;
+            label?: string;
+            patches?: Record<string, RankPatch>;
+          } | null;
+        };
+        if (cancelled || !json.ok) return;
+        applyLive("fp", json.fp ?? null, lastLiveFpTs);
+        applyLive("ds", json.ds ?? null, lastLiveDsTs);
+      } catch {
+        /* ignore transient poll errors */
+      }
+    };
+
+    void tick();
+    const id = window.setInterval(() => void tick(), 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   const myPicks = userPickOveralls(
     settings.slot,
@@ -865,7 +961,7 @@ export function DraftApp() {
                 {leagueStatus.join(" · ")}
                 <span className="text-muted-foreground">
                   {" "}
-                  (pinned until re-import)
+                  ({hasLiveLeagueSync ? "live bookmarklet sync" : "pinned until re-import / Sync FP·DS"})
                 </span>
                 {espn.live ? (
                   <>
@@ -875,9 +971,9 @@ export function DraftApp() {
                         type="button"
                         className="underline-offset-2 hover:underline"
                         onClick={() => openLeagueImport("fp")}
-                        title="Paste an updated FantasyPros synced-league cheat sheet"
+                        title="Re-paste or install Sync FP ranks bookmarklet on your FantasyPros Draft Assistant tab"
                       >
-                        Re-import FP
+                        {leagueRanks.fp.live ? "FP live" : "Re-import FP"}
                       </button>
                     ) : null}
                     {leagueRanks.fp?.matched && leagueRanks.ds?.matched ? " · " : null}
@@ -886,9 +982,9 @@ export function DraftApp() {
                         type="button"
                         className="underline-offset-2 hover:underline"
                         onClick={() => openLeagueImport("ds")}
-                        title="Paste an updated DraftSharks league War Room board"
+                        title="Re-paste or install Sync DS ranks bookmarklet on your DraftSharks War Room tab"
                       >
-                        Re-import DS
+                        {leagueRanks.ds.live ? "DS live" : "Re-import DS"}
                       </button>
                     ) : null}
                   </>
@@ -1642,8 +1738,8 @@ function ImportDialog({
         onClick={() => onOpenChange(true)}
         title={
           midDraft
-            ? "Re-import league FP/DS boards — public Refresh cannot pull login-gated War Room ranks"
-            : "Import league-specific FantasyPros / DraftSharks ranks"
+            ? "Live Sync FP/DS bookmarklets on War Room / Draft Assistant, or re-paste — public Refresh cannot pull login-gated boards"
+            : "Import league-specific FantasyPros / DraftSharks ranks (paste or live bookmarklet)"
         }
       >
         <ClipboardPaste /> {midDraft && hasAny ? "Re-import" : "Import"}
@@ -1660,18 +1756,21 @@ function ImportDialog({
               {midDraft && active ? "Re-import league rankings" : "League-specific rankings"}
             </DialogTitle>
             <DialogDescription>
-              Sync your league on FantasyPros or DraftSharks first, then export or copy that board
-              here. Draft Room cannot log into those sites — auto Refresh only updates public ECR /
-              3D. League columns stay pinned until you paste a fresh export
-              {midDraft ? " (do this mid-draft when War Room re-ranks remaining players)" : ""}.
+              Sync your league on FantasyPros or DraftSharks first. Prefer{" "}
+              <span className="font-medium text-foreground">Sync FP / Sync DS ranks</span>{" "}
+              bookmarklets on the open Draft Assistant / War Room tab for live remaining ranks.
+              Paste/CSV still works. Draft Room cannot read Chrome extension sidebars on ESPN —
+              only pages you open and bookmarklets can scrape. Auto Refresh only updates public
+              ECR / 3D.
+              {midDraft ? " Mid-draft: re-run the bookmarklet or paste when War Room re-ranks." : ""}
             </DialogDescription>
           </DialogHeader>
 
           {midDraft ? (
             <p className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs text-foreground">
-              Mid-draft: taken players are already filtered from ESPN. Public FP/DS ranks auto-update;
-              your synced league War Room / cheat sheet still needs a fresh paste here for
-              supply/demand-adjusted remaining ranks.
+              Mid-draft: taken players are filtered from ESPN. Public FP/DS auto-update. For
+              supply/demand league boards, keep FP Draft Assistant and/or DS War Room open and use
+              the Sync bookmarklets below — or paste a fresh export.
             </p>
           ) : null}
 
@@ -1685,11 +1784,25 @@ function ImportDialog({
               <TabsTrigger value="ds">DraftSharks</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="fp" className="space-y-2 text-xs text-muted-foreground">
+            <TabsContent value="fp" className="space-y-3 text-xs text-muted-foreground">
+              <RanksLiveSyncPanel
+                source="fp"
+                liveMatched={leagueRanks.fp?.live ? leagueRanks.fp.matched : undefined}
+                liveAt={leagueRanks.fp?.live ? leagueRanks.fp.importedAt : undefined}
+              />
               <ol className="list-decimal space-y-1 pl-4">
                 <li>On FantasyPros, sync JFL 28 (or your league) under My Leagues.</li>
                 <li>
                   Open{" "}
+                  <a
+                    className="text-primary underline-offset-2 hover:underline"
+                    href="https://draftwizard.fantasypros.com/football/leagues/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Draft Wizard / Draft Assistant
+                  </a>{" "}
+                  or{" "}
                   <a
                     className="text-primary underline-offset-2 hover:underline"
                     href="https://www.fantasypros.com/nfl/cheat-sheet-creator.php"
@@ -1697,26 +1810,33 @@ function ImportDialog({
                     rel="noreferrer"
                   >
                     Cheat Sheet Creator
-                  </a>
-                  , pick that synced league, start from ECR.
+                  </a>{" "}
+                  with that league selected.
                 </li>
-                <li>Download / export CSV (or copy the Rank, Player, Team, Pos table).</li>
-                <li>Paste below or choose the file — this replaces the FP column only.</li>
+                <li>
+                  Best: click <span className="font-medium text-foreground">Sync FP ranks</span> on
+                  that tab. Fallback: export CSV / paste Rank, Player below.
+                </li>
               </ol>
             </TabsContent>
 
-            <TabsContent value="ds" className="space-y-2 text-xs text-muted-foreground">
+            <TabsContent value="ds" className="space-y-3 text-xs text-muted-foreground">
+              <RanksLiveSyncPanel
+                source="ds"
+                liveMatched={leagueRanks.ds?.live ? leagueRanks.ds.matched : undefined}
+                liveAt={leagueRanks.ds?.live ? leagueRanks.ds.importedAt : undefined}
+              />
               <ol className="list-decimal space-y-1 pl-4">
                 <li>On DraftSharks, sync the same league so 3D values match your scoring / roster.</li>
                 <li>
-                  Open your league-adjusted rankings (Draft War Room or rankings with that league
-                  selected).
+                  Open your league-adjusted{" "}
+                  <span className="font-medium text-foreground">Draft War Room</span> (full site tab,
+                  not only the ESPN sidebar).
                 </li>
                 <li>
-                  Copy Rank + Player (+ Pos if available). DS has no public CSV for synced leagues —
-                  a Rank,Player paste is enough.
+                  Best: click <span className="font-medium text-foreground">Sync DS ranks</span> on
+                  that tab. Fallback: copy Rank + Player and paste below.
                 </li>
-                <li>Paste below — this replaces the DS column only.</li>
               </ol>
             </TabsContent>
           </Tabs>
@@ -1733,7 +1853,7 @@ function ImportDialog({
                   hour: "numeric",
                   minute: "2-digit",
                 })}
-                {midDraft ? " · re-paste to update" : ""}
+                {active.live ? " · live sync" : midDraft ? " · re-sync or re-paste to update" : ""}
               </span>
               <Button variant="ghost" size="sm" onClick={() => onClear(source)}>
                 Clear
