@@ -810,6 +810,12 @@ export function DraftApp() {
             >
               v{BUILD_LABEL}
             </span>
+            <span
+              className="hidden rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary sm:inline"
+              title="ESPN, FantasyPros, and DraftSharks bookmarks post through ntfy. You do not need a Cursor share URL."
+            >
+              Relay · no share URL
+            </span>
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
