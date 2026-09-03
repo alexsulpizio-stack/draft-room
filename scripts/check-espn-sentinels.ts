@@ -3,6 +3,9 @@ import {
   buildBookmarklet,
   cleanPickLogName,
   extractEspnDraftPicks,
+  isDisplayablePlayerName,
+  looksLikeEspnStatDump,
+  pickLogDisplayName,
   extrasFromMapped,
   ingestCorsHeaders,
   isEspnDraftNetworkUrl,
@@ -386,16 +389,85 @@ assert(richerOlder?.picks.length === 2, "older richer relay grows past newer par
 assert(cleanPickLogName("Ja'Marr Chase WR CIN") === "Ja'Marr Chase", "strip pos/team from scraped name");
 assert(cleanPickLogName("Ja'Marr Chase, WR, CIN") === "Ja'Marr Chase", "comma pos/team after name");
 assert(cleanPickLogName("Chase, Ja'Marr") === "Ja'Marr Chase", "flip last, first");
+assert(cleanPickLogName("Chuba Hubbard") === "Chuba Hubbard", "do not eat trailing d as pos code");
+assert(cleanPickLogName("93 Chuba Hubbard") === "Chuba Hubbard", "strip leading board rank");
+assert(cleanPickLogName("83 Jonathon Brooks Q") === "Jonathon Brooks", "strip rank and injury letter");
+assert(cleanPickLogName("Rico Dowdle · Molesters") === "Rico Dowdle", "strip middle-dot team suffix");
+assert(cleanPickLogName("Amon-Ra St. Brown") === "Amon-Ra St. Brown", "keep hyphenated player names");
+assert(cleanPickLogName("0 0 0 0 0 0 0 190 765 4 43 41 300 1 17 1") === "", "stat dump is not a name");
+assert(looksLikeEspnStatDump("0 0 0 0 0 0 0 190 765 4 43 41 300 1 17 1") === true, "ESPN stat line detected");
+assert(looksLikeEspnStatDump("93 Chuba Hubbard") === false, "rank + name is not a stat dump");
+assert(isPlaceholderEspnName("0 0 0 0 0 0 0 190 765 4 43") === true, "stat dump is a placeholder name");
+assert(isDisplayablePlayerName("Chuba Hubbard") === true, "real name is displayable");
+assert(isDisplayablePlayerName("0 0 0 0 190 765") === false, "ints are not displayable");
+assert(isDisplayablePlayerName(["0", "0", "190"]) === false, "array children are not a name");
+assert(pickLogDisplayName({ name: "0 0 0 0 190 765 4 43" }) === "Waiting for name", "pick log never dumps ints");
+assert(pickLogDisplayName({ name: "Tucker Kraft" }) === "Tucker Kraft", "pick log shows real names");
+assert(pickLogDisplayName(undefined) === "Waiting for name", "missing player waits");
 const log = parseEspnPickLog("1.01 Ja'Marr Chase WR CIN 1.02 Bijan Robinson RB ATL", 12);
 assert(log.length === 2, `collapsed pick log parsed, got ${log.length}`);
 assert(log[0].playerName === "Ja'Marr Chase" && log[1].playerName === "Bijan Robinson", "collapsed names match snapshot");
 assert(log[0].overallPickNumber === 1 && log[1].overallPickNumber === 2, "1.01 / 1.02 overalls");
+
+const scrapedBoard = parseEspnPickLog(
+  [
+    "75.05 0 0 0 0 0 0 0 190 765 4 43 41 300 1 17 1 · Bradys Sports Cards",
+    "91.03 93 Chuba Hubbard · Bradys Sports Cards",
+    "48.08 0 0 0 0 0 0 0 2 8 0 3 68 777 4 38 · you",
+    "18.07 92 Tucker Kraft Q · 2 Street",
+    "4.05 88 Rico Dowdle · Molesters",
+    "13.04 83 Jonathon Brooks Q · Finest Meats and Cheeses",
+    "72.06 82 Wan'Dale Robinson Q · It's Easy",
+    "95.01 Alec Pierce · Deadman Inc.",
+  ].join("\n"),
+  12,
+);
+assert(
+  scrapedBoard.every((p) => p.playerName && !looksLikeEspnStatDump(p.playerName) && /[A-Za-z]{2,}/.test(p.playerName)),
+  "pick log scrape keeps only real names",
+);
+assert(
+  !scrapedBoard.some((p) => /0 0 0/.test(p.playerName || "")),
+  "stat-dump rows are not ingested as picks",
+);
+assert(
+  scrapedBoard.some((p) => p.playerName === "Rico Dowdle" && p.overallPickNumber === 41),
+  "4.05 Rico Dowdle is a real pick",
+);
+assert(
+  scrapedBoard.some((p) => p.playerName === "Jonathon Brooks" && p.overallPickNumber === 148),
+  "13.04 Jonathon Brooks is a real pick",
+);
+assert(
+  !scrapedBoard.some((p) => (p.playerName || "").includes("Chuba")),
+  "91.03 projected points + rank is not a pick",
+);
+assert(
+  !scrapedBoard.some((p) => (p.playerName || "").includes("Pierce") || (p.playerName || "").includes("Tucker")),
+  "18.07 / 95.01 projection rows are not picks",
+);
+
+const mappedDump = mapEspnPicks({
+  picks: [
+    { overallPickNumber: 893, playerId: 0, teamId: 0, playerName: "0 0 0 0 0 0 0 190 765 4 43 41 300 1 17 1" },
+    { overallPickNumber: 1083, playerId: 0, teamId: 0, playerName: "93 Chuba Hubbard" },
+    { overallPickNumber: 41, playerId: 0, teamId: 8, playerName: "88 Rico Dowdle" },
+  ],
+  pickOrder: [],
+  teamsCount: 12,
+  players: new Map(),
+});
+assert(mappedDump.length === 1 && mappedDump[0].name === "Rico Dowdle", "listen mapping drops stat dumps and projection overalls");
+assert(mappedDump[0].playerId && !/^espn-0-0/.test(mappedDump[0].playerId), "real pick maps to a snapshot id");
 
 const bm = buildBookmarklet("http://127.0.0.1:43173", "https://ntfy.sh/drjfl28jackal");
 assert(bm.startsWith("javascript:"), "bookmarklet protocol");
 assert(bm.includes("/\\s+/g"), "bookmarklet keeps \\\\s whitespace regex");
 assert(bm.includes("^ESPN\\s+-?\\d+$"), "bookmarklet keeps ESPN placeholder regex");
 assert(bm.includes("(\\d{1,2})\\.(\\d{1,2})\\b"), "bookmarklet keeps pick-number regex");
+assert(bm.includes("[A-Za-z]{2,}"), "bookmarklet rejects nameless integer dumps");
+assert(bm.includes(".r>16"), "bookmarklet ignores projected-point X.YY above round 16");
+assert(bm.includes("0){3,}"), "bookmarklet drops leading 0 0 0 0 stat lines");
 assert(!bm.includes("/^ESPNs+-?d+$"), "bookmarklet must not cook \\\\s/\\\\d away");
 assert(!bm.includes(".replace(/s+/g"), "bookmarklet must not collapse the letter s");
 assert(bm.includes('badge(0,"starting")'), "badge paints before scrape/post");

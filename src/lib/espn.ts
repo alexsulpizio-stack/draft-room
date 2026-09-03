@@ -210,6 +210,42 @@ export function isSentinelBye(n: number | undefined | null): boolean {
   return n == null || !Number.isFinite(n) || n <= 0;
 }
 
+/**
+ * ESPN player-list / projection rows stringify as space-separated ints
+ * (`0 0 0 0 0 0 0 190 765 4 43 41 300 1 17 1`). Never treat those as names.
+ */
+export function looksLikeEspnStatDump(raw: string | undefined | null): boolean {
+  const s = String(raw ?? "")
+    .replace(/[,\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!s) return false;
+  if (/^0(?:\s+0){3,}/.test(s)) return true;
+  const parts = s.split(" ");
+  const nums = parts.filter((t) => /^-?\d+(?:\.\d+)?$/.test(t));
+  if (nums.length >= 6 && nums.length >= parts.length - 1) return true;
+  if (!/[A-Za-z]{2,}/.test(s) && nums.length >= 4) return true;
+  const digits = (s.match(/\d/g) || []).length;
+  const letters = (s.match(/[A-Za-z]/g) || []).length;
+  if (digits >= 10 && digits > letters * 2) return true;
+  return false;
+}
+
+/** Real person / DST name — not a placeholder, stat line, or id dump. */
+export function isDisplayablePlayerName(name: unknown): name is string {
+  if (typeof name !== "string") return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  if (isPlaceholderEspnName(trimmed)) return false;
+  if (looksLikeEspnStatDump(trimmed)) return false;
+  return /[A-Za-z]{2,}/.test(trimmed);
+}
+
+/** Pick log label: a real name, or a waiting placeholder — never ids / ints. */
+export function pickLogDisplayName(player: { name?: unknown } | undefined): string {
+  return isDisplayablePlayerName(player?.name) ? player.name.trim() : "Waiting for name";
+}
+
 /** Synthetic / sample names that must never drive board matching. */
 export function isPlaceholderEspnName(name: string | undefined | null): boolean {
   if (!name) return true;
@@ -223,6 +259,8 @@ export function isPlaceholderEspnName(name: string | undefined | null): boolean 
   if (/^(unknown(\s+player)?|n\/?a|null|undefined|sample|placeholder|lorem)$/i.test(trimmed)) {
     return true;
   }
+  if (looksLikeEspnStatDump(trimmed)) return true;
+  if (!/[A-Za-z]{2,}/.test(trimmed)) return true;
   return false;
 }
 
@@ -644,8 +682,9 @@ export function stubFromEspn(meta: {
   overall?: number;
   adp?: number;
 }): Player {
-  const name = meta.name.replace(/\s+D\/ST$/i, "");
-  const named = isPlaceholderEspnName(name) ? undefined : matchByName(name);
+  const rawName = meta.name.replace(/\s+D\/ST$/i, "");
+  const name = isDisplayablePlayerName(rawName) ? rawName : cleanPickLogName(rawName);
+  const named = name ? matchByName(name) : undefined;
   const live = mergeLiveEspnFields(named, {
     team: meta.team,
     bye: BYE_BY_TEAM[meta.team] ?? 0,
@@ -1068,20 +1107,30 @@ export function mapEspnPicks(args: {
   const { picks, pickOrder, teamsCount, players, draftType = "snake" } = args;
   const usedIds = new Set<string>();
   return picks
-    .filter(
-      (p) =>
-        isValidEspnPlayerId(p.playerId) ||
-        (Boolean(p.playerName) && !isPlaceholderEspnName(p.playerName)),
-    )
+    .filter((p) => {
+      const cleaned = p.playerName ? cleanPickLogName(p.playerName) : "";
+      const nameOk = Boolean(cleaned) && !isPlaceholderEspnName(cleaned);
+      const idOk = isValidEspnPlayerId(p.playerId);
+      if (!idOk && !nameOk) return false;
+      // Text scrapes turn projected points (75.05) into huge overalls. JSON has real ids.
+      if (!idOk && p.overallPickNumber > teamsCount * ESPN_PICK_LOG_MAX_ROUND) return false;
+      return true;
+    })
     .map((p) => {
       const espnIdRaw = espnPlayerIdOrZero(p.playerId);
       const metaRaw = espnIdRaw ? players.get(espnIdRaw) : undefined;
+      const cleanedName = p.playerName ? cleanPickLogName(p.playerName) : "";
       const rawName =
-        p.playerName &&
-        !isPlaceholderEspnName(p.playerName) &&
-        !/^player\s+\d+$/i.test(p.playerName.trim())
-          ? p.playerName
-          : undefined;
+        cleanedName &&
+        !isPlaceholderEspnName(cleanedName) &&
+        !/^player\s+\d+$/i.test(cleanedName)
+          ? cleanedName
+          : p.playerName &&
+              !isPlaceholderEspnName(p.playerName) &&
+              !looksLikeEspnStatDump(p.playerName) &&
+              !/^player\s+\d+$/i.test(p.playerName.trim())
+            ? p.playerName
+            : undefined;
       // Prefer the pick's own name. If ESPN id metadata is a different player, drop the id —
       // practice scrapes often attach the wrong athlete id to a correct name.
       const metaConflicts = espnMetaConflictsWithName(metaRaw?.name, rawName);
@@ -1438,26 +1487,35 @@ export function ingestCorsHeaders(req: Request): Record<string, string> {
 
 const PICK_LOG_UI = /^(pick|round|team|draft|start|bench|overall|player|clock|on the clock)$/i;
 
-/** Strip "WR CIN", "Last, First", and pick-number prefixes from scraped ESPN text. */
+/** ESPN text scrape: pick numbers are 1.01–16.XX. 75.05 / 91.03 are projected points. */
+export const ESPN_PICK_LOG_MAX_ROUND = 16;
+
+/** Strip "WR CIN", "Last, First", rank prefixes, and pick-number prefixes from scraped ESPN text. */
 export function cleanPickLogName(raw: string): string {
-  let name = String(raw || "").replace(/\s+/g, " ").trim();
+  let name = String(raw || "").replace(/\t+/g, " ").replace(/\s+/g, " ").trim();
+  if (looksLikeEspnStatDump(name)) return "";
   name = name.replace(/^\d+\.\d{1,2}\s+/, "");
-  name = name.replace(/,?\s*(QB|RB|WR|TE|K|DST|D\/ST|DEF|D)\b.*$/i, "");
-  name = name.replace(/,?\s*[A-Z]{2,3}\s*$/, "");
+  name = name.replace(/^\d{1,3}\s+/, "");
+  name = name.replace(/,?\s+(QB|RB|WR|TE|K|DST|D\/ST|DEF)\b.*$/i, "");
+  name = name.replace(/,?\s+[A-Z]{2,3}\s*$/, "");
   name = name.replace(/\s*\(.*\)\s*$/, "");
-  name = name.replace(/\s*[—–-]\s*.*$/, "").trim();
+  name = name.replace(/\s*[—–·•]\s*.*$/, "").trim();
+  name = name.replace(/\s+-\s+.*$/, "").trim();
+  name = name.replace(/\s+[QOP]$/i, "").trim();
   if (name.includes(",")) name = flipLastFirst(name);
   if (!name || name.length < 3 || name.length > 42) return "";
   if (isPlaceholderEspnName(name) || PICK_LOG_UI.test(name)) return "";
   if (!/[A-Za-z]{2,}/.test(name)) return "";
+  if (looksLikeEspnStatDump(name)) return "";
   return name;
 }
 
 export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
   const size = teams >= 2 && teams <= 20 ? teams : 12;
+  const maxOverall = size * ESPN_PICK_LOG_MAX_ROUND;
   const byOverall = new Map<number, EspnRawPick>();
   const push = (overall: number, rawName: string) => {
-    if (!Number.isFinite(overall) || overall < 1 || overall > 400) return;
+    if (!Number.isFinite(overall) || overall < 1 || overall > maxOverall) return;
     if (byOverall.has(overall)) return;
     const name = cleanPickLogName(rawName);
     if (!name) return;
@@ -1484,7 +1542,7 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
   }
   for (let i = 0; i < hits.length; i++) {
     const hit = hits[i];
-    if (hit.round < 1 || hit.slot < 1 || hit.slot > Math.max(size, 16)) continue;
+    if (hit.round < 1 || hit.round > ESPN_PICK_LOG_MAX_ROUND || hit.slot < 1 || hit.slot > Math.max(size, 16)) continue;
     const start = hit.index + hit.len;
     const end = i + 1 < hits.length ? hits[i + 1].index : Math.min(blob.length, start + 90);
     push((hit.round - 1) * size + hit.slot, blob.slice(start, end).replace(/[\n\t]+/g, " "));

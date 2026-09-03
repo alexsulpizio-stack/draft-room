@@ -99,14 +99,22 @@ function nameMap(json){
   return m;
 }
 function cleanName(s){
-  s=String(s||"").replace(/\s+/g," ").trim();
+  s=String(s||"").replace(/[,\t]+/g," ").replace(/\s+/g," ").trim();
+  if(/^0(?:\s+0){3,}/.test(s)||!/[A-Za-z]{2,}/.test(s)) return "";
+  var bits=s.split(" "),n=0,i;
+  for(i=0;i<bits.length;i++) if(/^-?\d+(?:\.\d+)?$/.test(bits[i])) n++;
+  if(n>=6&&n>=bits.length-1) return "";
   s=s.replace(/^\d+\.\d{1,2}\s+/,"");
-  s=s.replace(/,?\s*(QB|RB|WR|TE|K|DST|D\/ST|DEF|D)\b.*$/i,"");
-  s=s.replace(/,?\s*[A-Z]{2,3}\s*$/,"");
+  s=s.replace(/^\d{1,3}\s+/,"");
+  s=s.replace(/,?\s+(QB|RB|WR|TE|K|DST|D\/ST|DEF)\b.*$/i,"");
+  s=s.replace(/,?\s+[A-Z]{2,3}\s*$/,"");
   s=s.replace(/\s*\(.*\)\s*$/,"");
+  s=s.replace(/\s*[·•]\s*.*$/,"");
+  s=s.replace(/\s+[QOP]$/i,"");
   var comma=s.indexOf(",");
   if(comma>0){var last=s.slice(0,comma).trim(),first=s.slice(comma+1).trim();if(last&&first&&last.length<18) s=first+" "+last;}
   if(/^ESPN\s+-?\d+$/i.test(s)||s.length<3||s.length>42) return "";
+  if(!/[A-Za-z]{2,}/.test(s)) return "";
   if(/^(pick|round|team|draft|start|bench|overall|player|clock)$/i.test(s)) return "";
   return s;
 }
@@ -135,7 +143,7 @@ function parsePickText(text){
   var out=[],seen={},teams=(lastMeta&&lastMeta.teams)||12,m,re=/(\d{1,2})\.(\d{1,2})\b/g,hits=[];
   while((m=re.exec(text))) hits.push({i:m.index,len:m[0].length,r:Number(m[1]),s:Number(m[2])});
   for(var i=0;i<hits.length;i++){
-    if(hits[i].r<1||hits[i].s<1||hits[i].s>Math.max(teams,16)) continue;
+    if(hits[i].r<1||hits[i].r>16||hits[i].s<1||hits[i].s>Math.max(teams,16)) continue;
     var start=hits[i].i+hits[i].len,end=i+1<hits.length?hits[i+1].i:Math.min(text.length,start+90);
     var name=cleanName(text.slice(start,end).replace(/[\n\t]+/g," "));
     if(name) pushPick(out,seen,(hits[i].r-1)*teams+hits[i].s,0,0,name);

@@ -75,7 +75,7 @@ import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 import { RanksLiveSyncPanel } from "@/components/ranks-live-sync";
 import { RelayPulse } from "@/components/relay-pulse";
 import { isLeftoverAgentRankSnapshot } from "@/lib/leftover-tests";
-import { matchByName, mergeBoardWithEspnExtras } from "@/lib/espn";
+import { matchByName, mergeBoardWithEspnExtras, pickLogDisplayName } from "@/lib/espn";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
 
@@ -1446,7 +1446,7 @@ function PickLog({
   if (picks.length === 0) {
     return (
       <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground">
-        Live mode: click Taken on whoever comes off the board. Practice mode: Jump to me auto-picks the room by ADP until your turn.
+        Waiting for names. Live mode: click Taken on whoever comes off the board. Practice mode: Jump to me auto-picks the room by ADP until your turn.
       </p>
     );
   }
@@ -1456,6 +1456,7 @@ function PickLog({
       {recent.map((pk) => {
         const player = board.find((p) => p.id === pk.playerId);
         const mine = pk.team === settings.slot;
+        const label = pickLogDisplayName(player);
         return (
           <li
             key={pk.overall}
@@ -1469,7 +1470,7 @@ function PickLog({
                 {formatPick(pk.overall, settings.teams)}
               </span>
               <span className="truncate">
-                {player?.name ?? pk.playerId}
+                {label}
                 {mine ? " · you" : ` · ${settings.teamNames[pk.team - 1] ?? `T${pk.team}`}`}
               </span>
               <InjuryDot injury={player?.injury} />

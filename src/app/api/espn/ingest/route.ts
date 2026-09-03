@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isAllowedEspnIngestHref, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, originDiagnostics, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
+import { cleanPickLogName, espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isAllowedEspnIngestHref, isPlaceholderEspnName, isValidEspnPlayerId, looksLikeEspnStatDump, mergeIngestMeta, originDiagnostics, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 import { getRelayTopic, relayUrl } from "@/lib/espn-relay";
 import { buildCompressedEspnBookmarklet } from "@/lib/bookmarklet-compress";
@@ -12,6 +12,13 @@ function cors(req: Request, body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: ingestCorsHeaders(req) });
 }
 
+function ingestPlayerName(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (looksLikeEspnStatDump(raw) || isPlaceholderEspnName(raw)) return undefined;
+  const cleaned = cleanPickLogName(raw);
+  return cleaned || undefined;
+}
+
 function normalizePicks(raw: unknown): EspnRawPick[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -21,7 +28,7 @@ function normalizePicks(raw: unknown): EspnRawPick[] {
         overallPickNumber: Number(row.overallPickNumber ?? 0),
         playerId: espnPlayerIdOrZero(Number(row.playerId ?? 0)),
         teamId: Number(row.teamId ?? 0),
-        playerName: typeof row.playerName === "string" && !isPlaceholderEspnName(row.playerName) ? row.playerName : undefined,
+        playerName: ingestPlayerName(row.playerName),
       };
     })
     .filter((p) => p.overallPickNumber > 0 && (isValidEspnPlayerId(p.playerId) || Boolean(p.playerName)));
