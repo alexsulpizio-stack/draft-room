@@ -633,7 +633,7 @@ export function stubFromEspn(meta: {
     adp: live.adp,
     proj: 0,
     tags: ["espn"],
-    note: "On ESPN's board but not in this snapshot — still tracked as taken.",
+    note: "On ESPN's board but not in this snapshot.",
   };
 }
 

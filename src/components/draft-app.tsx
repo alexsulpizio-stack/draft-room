@@ -1168,7 +1168,7 @@ export function DraftApp() {
           <div className="rounded-2xl border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="font-display text-lg tracking-wide">
-                {done ? "Draft complete" : isUserPick ? "You're on the clock" : "What to take next"}
+                {done ? "Draft complete" : isUserPick ? "You're on the clock" : "Suggested Next Picks"}
               </h2>
               {!done && nextMine ? (
                 <Badge variant="outline">Your pick {formatPick(nextMine, settings.teams)}</Badge>

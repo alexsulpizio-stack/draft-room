@@ -329,25 +329,29 @@ export function recommendPicks(args: {
     .map((p) => {
       const v = vor(p, settings);
       const need = needScore(p, roster, settings);
-      const value = p.adp - overall;
+      // Sentinel/missing ADP (0, -1, 999, …) must not drive fall value or wait.
+      const adp = sourceRank(p.adp);
+      const value = adp != null ? adp - overall : null;
       const scarce = scarcityScore(p, available, settings.dsWeight);
       const fp = sourceRank(p.fpRank);
       const ds = sourceRank(p.dsRank);
       const gap = fp != null && ds != null ? fp - ds : 0;
       const dsPull = (gap * settings.dsWeight) / 50;
       const rank = blendedRank(p, settings.dsWeight);
-      const waitPicks = p.adp - overall;
+      const waitPicks = value;
       const wait: Recommendation["wait"] =
-        waitPicks <= picksUntilNext + 1
-          ? "now"
-          : waitPicks <= picksUntilNext + 8
-            ? "borderline"
-            : "can-wait";
+        waitPicks == null
+          ? "borderline"
+          : waitPicks <= picksUntilNext + 1
+            ? "now"
+            : waitPicks <= picksUntilNext + 8
+              ? "borderline"
+              : "can-wait";
 
       const score =
         v * 1.15 +
         need * 1.4 +
-        Math.max(value, -8) * 0.55 +
+        (value == null ? 0 : Math.max(value, -8) * 0.55) +
         scarce * 1.1 +
         dsPull * 0.35 +
         (rank == null ? 0 : (180 - rank) * 0.45) +
@@ -360,7 +364,9 @@ export function recommendPicks(args: {
       if (need >= 20) reasons.push(`Fills a starting ${p.pos} hole`);
       else if (need >= 16) reasons.push("Covers the RB/WR slot");
       else if (need >= 12) reasons.push("Covers FLEX");
-      if (value >= 8) reasons.push(`Falling ${Math.round(value)} spots past ADP`);
+      if (value != null && value >= 8) {
+        reasons.push(`Falling ${Math.round(value)} spots past ADP`);
+      }
       if (gap >= 5) reasons.push(`DraftSharks ${gap} spots ahead of FantasyPros`);
       if (gap <= -5) reasons.push(`FantasyPros ${Math.abs(gap)} spots ahead of DraftSharks`);
       if (scarce >= 10) reasons.push(`${p.pos} cliff — next tier is a drop`);
