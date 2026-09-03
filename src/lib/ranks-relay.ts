@@ -1,3 +1,4 @@
+import { pollNtfyJson } from "./ntfy-cache";
 import { NTFY_HOST, RANKS_RELAY_TOPIC } from "./relay-urls";
 import { commitRankScrape } from "./ranks-apply";
 import { isAllowedRanksIngestHref, type RankIngestRow } from "./ranks-ingest";
@@ -178,9 +179,7 @@ type NtfyLine = { event?: string; message?: string; title?: string };
 export async function pullRanksRelayIntoIngest(): Promise<boolean> {
   const url = `${NTFY_HOST}/${RANKS_RELAY_TOPIC}/json?poll=1&since=2h`;
   try {
-    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(4000) });
-    if (!res.ok) return false;
-    const text = await res.text();
+    const text = await pollNtfyJson(url);
     if (!text.trim()) return false;
     const bodies: string[] = [];
     for (const line of text.split("\n")) {

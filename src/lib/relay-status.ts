@@ -6,6 +6,7 @@ import {
   isLeftoverTestNtfyTitle,
   type RelayKind,
 } from "./leftover-tests";
+import { pollNtfyJson, postNtfy } from "./ntfy-cache";
 import { unpackRanksRelayMessage } from "./ranks-relay";
 
 export type { RelayKind };
@@ -39,15 +40,9 @@ function parseLines(text: string): NtfyLine[] {
   return out;
 }
 
-async function pollTopic(topic: string, since = "12h"): Promise<NtfyLine[]> {
+async function pollTopic(topic: string, since = "2h"): Promise<NtfyLine[]> {
   const url = `${NTFY_HOST}/${topic}/json?poll=1&since=${since}`;
-  try {
-    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(4000) });
-    if (!res.ok) return [];
-    return parseLines(await res.text());
-  } catch {
-    return [];
-  }
+  return parseLines(await pollNtfyJson(url));
 }
 
 export async function peekRelay(): Promise<RelayPeek> {
@@ -191,19 +186,7 @@ export async function postRelayTest(): Promise<{
     r: [],
     ping: 1,
   });
-  const post = async (topic: string, body: string) => {
-    try {
-      const res = await fetch(`${NTFY_HOST}/${topic}`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body,
-        signal: AbortSignal.timeout(5000),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  };
+  const post = async (topic: string, body: string) => postNtfy(`${NTFY_HOST}/${topic}`, body);
   const [espnPosted, ranksPosted] = await Promise.all([
     post(ESPN_RELAY_TOPIC, espnBody),
     post(RANKS_RELAY_TOPIC, ranksBody),

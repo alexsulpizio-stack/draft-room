@@ -10,6 +10,7 @@ import {
 import { setIngest, getIngest, type IngestPayload } from "./espn-ingest";
 import { ESPN_RELAY_TOPIC, NTFY_HOST } from "./relay-urls";
 import { isLeftoverEspnTestPicks, isLeftoverTestNtfyTitle } from "./leftover-tests";
+import { pollNtfyJson } from "./ntfy-cache";
 
 const TOPIC_PATHS = [
   `${process.cwd()}/.data/espn-relay-topic`,
@@ -146,9 +147,7 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
   const topic = getRelayTopic();
   const url = `${NTFY_HOST}/${topic}/json?poll=1&since=2h`;
   try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return false;
-    const text = await res.text();
+    const text = await pollNtfyJson(url);
     if (!text.trim()) return false;
     let best: UnpackedRelay | null = null;
     let heartbeat: UnpackedRelay | null = null;

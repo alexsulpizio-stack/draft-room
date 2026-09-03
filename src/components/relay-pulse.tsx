@@ -52,7 +52,7 @@ export function RelayPulse() {
 
   useEffect(() => {
     void load();
-    const t = window.setInterval(() => void load(), 5000);
+    const t = window.setInterval(() => void load(), 10000);
     return () => window.clearInterval(t);
   }, [load]);
 
@@ -68,7 +68,7 @@ export function RelayPulse() {
       };
       setPeek(json);
       if (!json.espnPosted && !json.ranksPosted) {
-        setErr("ntfy post failed");
+        setErr("ntfy busy (rate limit) — wait ~1 min");
       }
     } catch {
       setErr("relay test failed");
