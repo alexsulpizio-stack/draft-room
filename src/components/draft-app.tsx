@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -62,6 +62,8 @@ import {
 import {
   applyInjuryOverlay,
   applyRankPatches,
+  LIVE_RANK_POLL_MS,
+  MIN_REFRESH_INTERVAL_MS,
   scoringLabel,
   type RankPatch,
 } from "@/lib/rank-refresh";
@@ -137,7 +139,14 @@ type RankOverlay = {
   injuryMatched?: number;
   injuriesLive?: boolean;
   injuriesComplete?: boolean;
+  lastAttemptAt?: number;
+  lastError?: string;
+  lastSource?: "manual" | "pick" | "poll";
+  cached?: boolean;
+  ranksOnly?: boolean;
 };
+
+type RefreshReason = "manual" | "pick" | "poll";
 
 type Persisted = {
   settings: LeagueSettings;
@@ -268,7 +277,16 @@ export function DraftApp() {
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [espn, setEspn] = useState<EspnLiveStatus>({ live: false, source: "empty", pickCount: 0 });
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRanks, setAutoRanks] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
+  const refreshingRef = useRef(false);
+  const lastAutoPickCount = useRef(-1);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const leagueRanksRef = useRef(leagueRanks);
+  leagueRanksRef.current = leagueRanks;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   const board = useMemo(() => {
     const refreshed = applyRankPatches(PLAYERS, rankOverlay?.patches);
@@ -454,11 +472,19 @@ export function DraftApp() {
     );
   };
 
-  const refreshRankings = async () => {
+  const refreshRankings = useCallback(async (reason: RefreshReason = "manual") => {
+    if (refreshingRef.current && reason !== "manual") return;
+    const scoring = settingsRef.current.scoring;
+    const ranksOnly = reason !== "manual";
+    const force = reason === "manual";
+    refreshingRef.current = true;
     setRefreshing(true);
-    setImportMsg(null);
+    if (reason === "manual") setImportMsg(null);
     try {
-      const res = await fetch(`/api/rankings/refresh?scoring=${settings.scoring}`, { cache: "no-store" });
+      const qs = new URLSearchParams({ scoring });
+      if (ranksOnly) qs.set("ranksOnly", "1");
+      if (force) qs.set("force", "1");
+      const res = await fetch(`/api/rankings/refresh?${qs}`, { cache: "no-store" });
       const json = (await res.json()) as {
         ok: boolean;
         error?: string;
@@ -473,60 +499,138 @@ export function DraftApp() {
         fpMatched?: number;
         dsMatched?: number;
         fpUpdated?: string;
+        cached?: boolean;
+        ranksOnly?: boolean;
       };
+      const attemptAt = Date.now();
       if (!json.ok) {
-        setImportMsg(json.error ?? "Could not refresh FantasyPros / DraftSharks ranks.");
+        const err = json.error ?? "Could not refresh FantasyPros / DraftSharks ranks.";
+        const prev = dataRef.current.rankOverlay;
+        writeStore({
+          ...dataRef.current,
+          rankOverlay: {
+            ...(prev ?? {
+              patches: {},
+              fetchedAt: 0,
+              scoring,
+              fpMatched: 0,
+              dsMatched: 0,
+            }),
+            lastAttemptAt: attemptAt,
+            lastError: err,
+            lastSource: reason,
+          },
+        });
+        if (reason === "manual") setImportMsg(err);
         return;
       }
+      const prev = dataRef.current.rankOverlay;
       const patches =
-        json.patches && Object.keys(json.patches).length > 0
-          ? json.patches
-          : data.rankOverlay?.patches;
-      const injuriesLive = Boolean(json.injuriesLive && json.injuries);
-      const injuriesComplete = Boolean(injuriesLive && json.injuriesComplete);
+        json.patches && Object.keys(json.patches).length > 0 ? json.patches : prev?.patches;
+      const injuriesLive = ranksOnly
+        ? Boolean(prev?.injuriesLive && prev?.injuries)
+        : Boolean(json.injuriesLive && json.injuries);
+      const injuriesComplete = ranksOnly
+        ? Boolean(prev?.injuriesComplete)
+        : Boolean(injuriesLive && json.injuriesComplete);
       const kept: string[] = [];
-      if (leagueRanks.fp?.matched) kept.push("FP league import");
-      if (leagueRanks.ds?.matched) kept.push("DS league import");
+      const lr = leagueRanksRef.current;
+      if (lr.fp?.matched) kept.push("FP league import");
+      if (lr.ds?.matched) kept.push("DS league import");
       writeStore({
-        ...data,
+        ...dataRef.current,
         rankOverlay: {
           patches: patches ?? {},
-          fetchedAt: json.fetchedAt ?? Date.now(),
-          scoring: json.scoring ?? settings.scoring,
-          fpMatched: json.fpMatched ?? 0,
-          dsMatched: json.dsMatched ?? 0,
-          fpUpdated: json.fpUpdated,
-          injuries: injuriesLive ? json.injuries : data.rankOverlay?.injuries,
-          injuryMatched: injuriesLive
-            ? json.injuryMatched
-            : data.rankOverlay?.injuryMatched,
-          injuriesLive: injuriesLive || data.rankOverlay?.injuriesLive,
-          injuriesComplete: injuriesLive
-            ? injuriesComplete
-            : data.rankOverlay?.injuriesComplete,
+          fetchedAt: json.cached && prev?.fetchedAt ? prev.fetchedAt : (json.fetchedAt ?? attemptAt),
+          scoring: json.scoring ?? scoring,
+          fpMatched: json.fpMatched ?? prev?.fpMatched ?? 0,
+          dsMatched: json.dsMatched ?? prev?.dsMatched ?? 0,
+          fpUpdated: json.fpUpdated ?? prev?.fpUpdated,
+          injuries: ranksOnly
+            ? prev?.injuries
+            : injuriesLive
+              ? json.injuries
+              : prev?.injuries,
+          injuryMatched: ranksOnly
+            ? prev?.injuryMatched
+            : injuriesLive
+              ? json.injuryMatched
+              : prev?.injuryMatched,
+          injuriesLive: ranksOnly ? prev?.injuriesLive : injuriesLive || prev?.injuriesLive,
+          injuriesComplete: ranksOnly
+            ? prev?.injuriesComplete
+            : injuriesLive
+              ? injuriesComplete
+              : prev?.injuriesComplete,
+          lastAttemptAt: attemptAt,
+          lastError: undefined,
+          lastSource: reason,
+          cached: Boolean(json.cached),
+          ranksOnly: Boolean(json.ranksOnly ?? ranksOnly),
         },
       });
-      const baseMsg = [
-        json.fpMatched ? `FP ${json.fpMatched}` : null,
-        json.dsMatched ? `DS ${json.dsMatched}` : null,
-        injuriesLive ? `injuries ${json.injuryMatched ?? 0}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      const keepNote = kept.length
-        ? ` League-specific ${kept.join(" + ")} still override generic ECR.`
-        : " Tip: Import your synced FP/DS cheat sheets for league-adjusted ranks.";
-      setImportMsg(
-        `Refreshed public ${scoringLabel((json.scoring as LeagueSettings["scoring"]) ?? settings.scoring)} ranks${
-          baseMsg ? ` (${baseMsg})` : ""
-        }.${keepNote}${json.warnings?.length ? ` · ${json.warnings[0]}` : ""}`,
-      );
+      if (reason === "manual") {
+        const baseMsg = [
+          json.fpMatched ? `FP ${json.fpMatched}` : null,
+          json.dsMatched ? `DS ${json.dsMatched}` : null,
+          !ranksOnly && injuriesLive ? `injuries ${json.injuryMatched ?? 0}` : null,
+          json.cached ? "cached" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const keepNote = kept.length
+          ? ` League-specific ${kept.join(" + ")} still override generic ECR.`
+          : " Tip: Import synced FP/DS cheat sheets for league-adjusted ranks.";
+        setImportMsg(
+          `Refreshed public ${scoringLabel((json.scoring as LeagueSettings["scoring"]) ?? scoring)} ranks${
+            baseMsg ? ` (${baseMsg})` : ""
+          }.${keepNote}${json.warnings?.length ? ` · ${json.warnings[0]}` : ""}`,
+        );
+      }
     } catch (e) {
-      setImportMsg(e instanceof Error ? e.message : "Rank refresh failed.");
+      const err =
+        e instanceof Error ? e.message : "Network error refreshing ranks. The snapshot board is unchanged.";
+      const prev = dataRef.current.rankOverlay;
+      if (prev) {
+        writeStore({
+          ...dataRef.current,
+          rankOverlay: {
+            ...prev,
+            lastAttemptAt: Date.now(),
+            lastError: err,
+            lastSource: reason,
+          },
+        });
+      }
+      if (reason === "manual") setImportMsg(err);
     } finally {
+      refreshingRef.current = false;
       setRefreshing(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!autoRanks || !espn.live || done) return;
+    if (espn.pickCount === lastAutoPickCount.current) return;
+    const prev = lastAutoPickCount.current;
+    lastAutoPickCount.current = espn.pickCount;
+    if (prev < 0 && espn.pickCount === 0) return;
+    if (prev >= 0 && espn.pickCount <= prev) return;
+    const t = window.setTimeout(() => void refreshRankings("pick"), 400);
+    return () => window.clearTimeout(t);
+  }, [autoRanks, espn.live, espn.pickCount, done, refreshRankings]);
+
+  useEffect(() => {
+    if (!autoRanks || !espn.live || done) return;
+    const id = window.setInterval(() => {
+      void refreshRankings("poll");
+    }, LIVE_RANK_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [autoRanks, espn.live, done, refreshRankings]);
+
+  useEffect(() => {
+    if (!espn.live) lastAutoPickCount.current = -1;
+  }, [espn.live]);
 
   const myPicks = userPickOveralls(
     settings.slot,
@@ -605,9 +709,9 @@ export function DraftApp() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void refreshRankings()}
+              onClick={() => void refreshRankings("manual")}
               disabled={refreshing}
-              title="Pull public FantasyPros ECR + DraftSharks 3D for your scoring setting, plus injury flags. Does not replace league-specific imports."
+              title="Pull public FantasyPros ECR + DraftSharks 3D for your scoring, plus injury flags. Mid-draft auto-refresh uses a lighter ranks-only path. Does not replace league-specific imports."
             >
               {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               {refreshing ? "Refreshing…" : "Refresh ranks"}
@@ -628,29 +732,65 @@ export function DraftApp() {
         </div>
         {importMsg ? (
           <p className="border-t border-border px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
-        ) : leagueStatus.length > 0 ? (
-          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">League ranks</span>
+        ) : rankOverlay?.lastError ? (
+          <p className="border-t border-destructive/30 bg-destructive/5 px-4 py-1.5 text-center text-xs text-destructive">
+            Rank refresh failed
+            {rankOverlay.lastAttemptAt
+              ? ` · ${new Date(rankOverlay.lastAttemptAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+              : ""}
             {" · "}
-            {leagueStatus.join(" · ")}
-            {" · blend / # / suggestions use these instead of generic ECR"}
+            {rankOverlay.lastError}
           </p>
-        ) : espn.live ? (
-          <p className="border-t border-primary/20 bg-primary/8 px-4 py-1.5 text-center text-xs">
-            <span className="font-medium text-primary">ESPN live</span>
-            <span className="text-muted-foreground">
-              {" "}
-              · {espn.pickCount} picks
-              {espn.pickCount === 0
-                ? " · waiting for pick 1"
-                : espn.source === "room-capture"
-                  ? " · room capture"
-                  : espn.source === "espn-api"
-                    ? " · league API"
-                    : " · waiting for picks"}
-              {espn.leagueName ? ` · ${espn.leagueName}` : ""}
-              {espn.warning ? ` · ${espn.warning}` : ""}
-            </span>
+        ) : leagueStatus.length > 0 || espn.live || rankOverlay ? (
+          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-muted-foreground">
+            {espn.live ? (
+              <>
+                <span className="font-medium text-primary">ESPN live</span>
+                <span>
+                  {" "}
+                  · {espn.pickCount} picks
+                  {espn.pickCount === 0
+                    ? " · waiting for pick 1"
+                    : espn.source === "room-capture"
+                      ? " · room capture"
+                      : espn.source === "espn-api"
+                        ? " · league API"
+                        : ""}
+                  {espn.leagueName ? ` · ${espn.leagueName}` : ""}
+                  {espn.warning ? ` · ${espn.warning}` : ""}
+                </span>
+                <span>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="underline-offset-2 hover:underline"
+                    onClick={() => setAutoRanks((v) => !v)}
+                    title={`Auto-refresh public FP/DS every ~${Math.round(LIVE_RANK_POLL_MS / 1000)}s and after new picks (throttled ${Math.round(MIN_REFRESH_INTERVAL_MS / 1000)}s). Not league War Room.`}
+                  >
+                    {autoRanks ? "auto ranks on" : "auto ranks off"}
+                  </button>
+                </span>
+              </>
+            ) : null}
+            {espn.live && (leagueStatus.length > 0 || rankOverlay) ? " · " : null}
+            {leagueStatus.length > 0 ? (
+              <>
+                <span className="font-medium text-foreground">League ranks</span>
+                {" · "}
+                {leagueStatus.join(" · ")}
+              </>
+            ) : null}
+            {rankOverlay?.fetchedAt ? (
+              <>
+                {leagueStatus.length > 0 || espn.live ? " · " : null}
+                <span className="font-medium text-foreground">FP/DS</span>
+                {` refreshed ${new Date(rankOverlay.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+                {rankOverlay.lastSource && rankOverlay.lastSource !== "manual"
+                  ? ` · ${rankOverlay.lastSource}`
+                  : ""}
+                {rankOverlay.cached ? " · cached" : ""}
+              </>
+            ) : null}
           </p>
         ) : null}
       </header>
@@ -702,12 +842,12 @@ export function DraftApp() {
                       : sortKey === "adp"
                         ? ` · sorted by ADP ${sortDir === "asc" ? "earliest first" : "latest first"}`
                         : ` · sorted by FP vs DS gap ${sortDir === "desc" ? "DS+ first" : "FP+ first"}`}
-              {rankOverlay
+              {rankOverlay?.fetchedAt
                 ? ` · live ${scoringLabel(settings.scoring)} ${new Date(rankOverlay.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${
                     rankOverlay.injuriesLive
                       ? ` · ${rankOverlay.injuryMatched ?? 0} injury flags`
                       : ""
-                  }`
+                  }${espn.live && autoRanks ? " · auto" : ""}`
                 : " · Sept 1 snapshot"}
               {leagueRanks.fp?.matched || leagueRanks.ds?.matched
                 ? ` · league ${[

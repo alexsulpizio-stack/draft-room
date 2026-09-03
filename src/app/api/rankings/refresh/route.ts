@@ -10,16 +10,24 @@ function parseScoring(raw: string | null): Scoring {
   return "half";
 }
 
+/** GET ?scoring=half&ranksOnly=1&force=1 */
 export async function GET(req: Request) {
-  const scoring = parseScoring(new URL(req.url).searchParams.get("scoring"));
+  const url = new URL(req.url);
+  const scoring = parseScoring(url.searchParams.get("scoring"));
+  const ranksOnly =
+    url.searchParams.get("ranksOnly") === "1" ||
+    url.searchParams.get("ranksOnly") === "true";
+  const force =
+    url.searchParams.get("force") === "1" || url.searchParams.get("force") === "true";
   try {
-    const result = await refreshLiveRankings(scoring);
+    const result = await refreshLiveRankings(scoring, { ranksOnly, force });
     return NextResponse.json(result, { status: result.ok ? 200 : 502 });
   } catch (e) {
     return NextResponse.json(
       {
         ok: false,
         scoring,
+        ranksOnly,
         error: e instanceof Error ? e.message : "Rankings refresh failed.",
       },
       { status: 502 },

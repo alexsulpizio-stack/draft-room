@@ -56,7 +56,21 @@ Cookies still exist under **Show cookies** if a browser blocks the bookmark. Def
 - Never draft a D/ST. Kicker in the last round.
 - 1QB: wait unless elite value falls.
 
-Ranks start as a September 1, 2026 snapshot of public FantasyPros ECR and DraftSharks 3D values. Click **Refresh ranks** to pull live public Half PPR (or whatever scoring is set in League) sheets **and recent injury flags** (Out / Q / Watch) from FantasyPros injury news, DraftSharks ranking badges when present, and the public ESPN injury report (no cookies). That refresh is **generic scoring ECR / 3D** — Draft Room cannot log into your FantasyPros or DraftSharks account, so it cannot see ranks that only exist after you sync a private league.
+Ranks start as a September 1, 2026 snapshot of public FantasyPros ECR and DraftSharks 3D values.
+
+### Live mid-draft refresh
+
+While **Sync ESPN** is connected, Draft Room **auto-refreshes** public FP ECR + DraftSharks 3D:
+
+- After each new ESPN pick (debounced)
+- On a ~90s interval while the draft is live
+- Always via the **Refresh ranks** button (full refresh including injuries)
+
+Auto-refresh uses a **ranks-only** upstream path (2 pages) and the server **throttles to at most once per 60s** per scoring mode so we do not hammer FantasyPros / DraftSharks. The header shows last-refreshed time, auto on/off, and refresh errors. Toggle auto with the **auto ranks on/off** control in the status strip.
+
+**Best available live source:** public FantasyPros consensus cheatsheets and DraftSharks ranking tables for your League scoring setting. Those boards update during draft season as experts move players; they are **not** login-gated Draft War Room / league-synced remaining-player boards (those need Import below). League-specific imports still override the matching column when present.
+
+Manual **Refresh ranks** also pulls injury flags (Out / Q / Watch) from FantasyPros injury news, DraftSharks badges when present, and the public ESPN injury report (no cookies).
 
 ## League-specific FP / DS ranks
 
@@ -81,4 +95,4 @@ DraftSharks does not offer a public CSV for synced-league boards. After you sync
 
 That replaces the **DS** column only.
 
-Imports persist in the browser (localStorage). **Refresh ranks** still updates public sheets and injuries but **does not wipe** league imports — those keep winning for their column until you clear them in the Import dialog.
+Imports persist in the browser (localStorage). **Refresh ranks** and mid-draft auto-refresh still update public sheets (and injuries on manual refresh) but **do not wipe** league imports — those keep winning for their column until you clear them in the Import dialog.
