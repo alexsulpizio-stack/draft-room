@@ -33,6 +33,7 @@ import {
 } from "@/lib/espn";
 import type { DraftPick, LeagueSettings, Player } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { BUILD_LABEL, buildTitle } from "@/lib/version";
 
 const AUTH_KEY = "draft-room-espn-auth";
 const CONN_KEY = "draft-room-espn-conn";
@@ -834,6 +835,13 @@ export function EspnSync({
                 </div>
               ) : null}
             </div>
+
+            <p
+              className="border-t border-border pt-3 text-center font-mono text-[10px] text-muted-foreground"
+              title={buildTitle()}
+            >
+              Draft Room v{BUILD_LABEL}
+            </p>
           </div>
         </SheetContent>
       </Sheet>

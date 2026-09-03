@@ -35,6 +35,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { BUILD_LABEL, buildTitle } from "@/lib/version";
 import { PLAYERS, displayName } from "@/lib/players";
 import {
   autoPickForTeam,
@@ -493,6 +494,12 @@ export function DraftApp() {
                 {settings.draftType === "linear" ? "linear" : "snake"}
               </p>
             </div>
+            <span
+              className="rounded-md border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+              title={buildTitle()}
+            >
+              v{BUILD_LABEL}
+            </span>
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">

@@ -30,6 +30,8 @@ npm run dev
 
 Open [http://localhost:43173](http://localhost:43173) in Chrome on a computer. Keep ESPN in another tab.
 
+The header and **Sync ESPN** sheet show the build as `v{package version} · {git short SHA}` so you can confirm you are on the latest commit after an update.
+
 JFL 28 on ESPN:
 
 - League home: [https://fantasy.espn.com/football/league?leagueId=1361349772&seasonId=2026](https://fantasy.espn.com/football/league?leagueId=1361349772&seasonId=2026)
