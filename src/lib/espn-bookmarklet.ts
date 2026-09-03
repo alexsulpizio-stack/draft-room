@@ -386,13 +386,43 @@ function collectPickText(){
 function takeTextPicks(){
   return parsePickText(collectPickText());
 }
+function mergePickLists(base,extra){
+  if(!extra||!extra.length) return base||[];
+  if(!base||!base.length) return extra;
+  var by={},i,p,out=[];
+  for(i=0;i<base.length;i++){
+    p=base[i]; if(!p||!(p.overallPickNumber>0)) continue;
+    by[p.overallPickNumber]=p;
+  }
+  for(i=0;i<extra.length;i++){
+    p=extra[i]; if(!p||!(p.overallPickNumber>0)) continue;
+    var prev=by[p.overallPickNumber];
+    if(!prev){ by[p.overallPickNumber]=p; continue; }
+    // Prefer a real name; prefer a positive id only when names agree or prev had none.
+    var name=prev.playerName||p.playerName||"";
+    var id=prev.playerId||0;
+    if(!(id>0)&&p.playerId>0) id=p.playerId;
+    if(p.playerName&&(!prev.playerName||prev.playerName.length<p.playerName.length)) name=p.playerName;
+    by[p.overallPickNumber]={
+      overallPickNumber:p.overallPickNumber,
+      playerId:id,
+      teamId:prev.teamId||p.teamId||0,
+      playerName:name
+    };
+  }
+  for(i in by) if(Object.prototype.hasOwnProperty.call(by,i)) out.push(by[i]);
+  out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
+  return out;
+}
 function takeAllPicks(json){
+  // Never stop at a thin JSON list — practice drafts often return a few id slots while
+  // the board/DOM already shows more names. Merge every source by overall pick.
   var got=json?takePicks(json):[];
-  if(!got.length) got=takeReactPicks();
-  if(!got.length) got=takeGlobalPicks();
-  if(!got.length) got=takeBoardPicks();
-  if(!got.length) got=takeTextPicks();
-  if(!got.length) got=takeDomPicks();
+  got=mergePickLists(got,takeReactPicks());
+  got=mergePickLists(got,takeGlobalPicks());
+  got=mergePickLists(got,takeBoardPicks());
+  got=mergePickLists(got,takeTextPicks());
+  got=mergePickLists(got,takeDomPicks());
   return got;
 }
 function scrapeThenPost(meta,err){

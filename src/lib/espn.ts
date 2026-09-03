@@ -210,12 +210,41 @@ export function isSentinelBye(n: number | undefined | null): boolean {
   return n == null || !Number.isFinite(n) || n <= 0;
 }
 
-/** Synthetic "ESPN -1" names from unfilled slots — not real players. */
+/** Synthetic / sample names that must never drive board matching. */
 export function isPlaceholderEspnName(name: string | undefined | null): boolean {
   if (!name) return true;
-  const m = name.trim().match(/^ESPN\s+(-?\d+)$/i);
-  if (!m) return false;
-  return Number(m[1]) <= 0;
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  // Unfilled ESPN slots: "ESPN -1", "ESPN 0"
+  const espnSlot = trimmed.match(/^ESPN\s+(-?\d+)$/i);
+  if (espnSlot) return Number(espnSlot[1]) <= 0;
+  // Generic stubs
+  if (/^player\s+-?\d+$/i.test(trimmed)) return true;
+  if (/^(unknown(\s+player)?|n\/?a|null|undefined|sample|placeholder|lorem)$/i.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True when ESPN id metadata clearly disagrees with the scraped/pick name.
+ * Practice-draft scrapes often pair a correct name with the wrong athlete id.
+ */
+export function espnMetaConflictsWithName(
+  metaName: string | undefined,
+  pickName: string | undefined,
+): boolean {
+  if (!metaName || !pickName) return false;
+  if (isPlaceholderEspnName(metaName) || isPlaceholderEspnName(pickName)) return false;
+  const a = compactPlayerName(metaName);
+  const b = compactPlayerName(pickName);
+  if (!a || !b || a === b) return false;
+  const aLast = lastNameOf(metaName);
+  const bLast = lastNameOf(pickName);
+  if (aLast && aLast === bLast && firstNamesCompatible(firstNameOf(metaName), firstNameOf(pickName))) {
+    return false;
+  }
+  return true;
 }
 
 /** Prefer live ESPN team/bye/ADP only when they are real; otherwise keep the snapshot. */
@@ -1045,23 +1074,30 @@ export function mapEspnPicks(args: {
         (Boolean(p.playerName) && !isPlaceholderEspnName(p.playerName)),
     )
     .map((p) => {
-      const espnId = espnPlayerIdOrZero(p.playerId);
-      const meta = espnId ? players.get(espnId) : undefined;
+      const espnIdRaw = espnPlayerIdOrZero(p.playerId);
+      const metaRaw = espnIdRaw ? players.get(espnIdRaw) : undefined;
       const rawName =
         p.playerName &&
         !isPlaceholderEspnName(p.playerName) &&
         !/^player\s+\d+$/i.test(p.playerName.trim())
           ? p.playerName
           : undefined;
+      // Prefer the pick's own name. If ESPN id metadata is a different player, drop the id —
+      // practice scrapes often attach the wrong athlete id to a correct name.
+      const metaConflicts = espnMetaConflictsWithName(metaRaw?.name, rawName);
+      const espnId = metaConflicts ? 0 : espnIdRaw;
+      const meta = metaConflicts ? undefined : metaRaw;
       const name = rawName || meta?.name || "";
+      // Name match wins over id→meta. Wrong ids were flipping Gibbs to WR, Chase to RB, etc.
+      const namedSnap = name ? matchByName(name) : undefined;
       const snapshot =
-        (name ? matchByName(name) : undefined) ??
-        (meta?.ourId ? PLAYER_BY_ID.get(meta.ourId) : undefined);
-      const pos = meta?.pos ?? snapshot?.pos ?? "WR";
+        namedSnap ?? (meta?.ourId ? PLAYER_BY_ID.get(meta.ourId) : undefined);
+      const pos = snapshot?.pos ?? meta?.pos ?? "WR";
       const live = mergeLiveEspnFields(snapshot, {
-        team: meta?.team,
+        // Only apply ESPN team when it agrees with the named player (or we have no name match).
+        team: namedSnap ? undefined : meta?.team,
         bye: snapshot?.bye ?? (meta?.team ? BYE_BY_TEAM[meta.team] ?? 0 : 0),
-        adp: meta?.adp ?? snapshot?.adp,
+        adp: namedSnap?.adp ?? meta?.adp ?? snapshot?.adp,
       });
       let ourId = snapshot?.id ?? meta?.ourId ?? (name ? matchOurPlayer(name, pos, live.team) : null);
       if (!ourId) ourId = unmatchedEspnId(name, p.overallPickNumber, espnId);
