@@ -72,6 +72,15 @@ Draft Room reads league ID, season, team count, league name, draft type, and you
 
 Cookies still exist under **Show cookies** if a browser blocks the bookmark. Defaults stay **JackAL, pick 5** in JFL 28 until you sync a different room.
 
+### Perfect sync session (checklist)
+
+1. Draft Room open on **43173** (or your Cloud preview). Reinstall bookmarks after any update.
+2. **ESPN draft tab** → click **Sync ESPN** only. Green badge = connected. Leave that tab open.
+3. **FantasyPros** full-site tab (Draft Assistant / cheat sheet, league synced) → **Sync FP ranks**. Teal badge.
+4. **DraftSharks** full-site tab (War Room, league synced) → **Sync DS ranks**. Teal badge.
+5. If FP/DS were paste-imported earlier and are not live, use **Import / Re-import** mid-draft — public auto-refresh does not replace login-gated boards.
+6. Practice draft with empty names: badge says connected / 0 picks → paste pick history in Sync ESPN step 3.
+
 ## How to draft this format
 
 - You start **three WRs**. Early WR is not a reach the way it is in 2-WR leagues.
@@ -100,6 +109,8 @@ Auto-refresh uses a **ranks-only** upstream path (2 pages) and the server **thro
 Opening the FantasyPros or DraftSharks **Chrome extension sidebars on ESPN is not enough**. Those plugins keep rankings in isolated extension worlds / cross-origin frames — a web app cannot read them.
 
 **What works:** keep the full FantasyPros Draft Assistant (or cheat sheet) and/or DraftSharks Draft War Room open in its own tab (logged in, league selected). Install bookmarklets from Draft Room → **Import**:
+
+Channels stay separate: **Sync ESPN** → `/api/espn/ingest` (fantasy.espn.com only). **Sync FP ranks** / **Sync DS ranks** → `/api/ranks/ingest` with `source: fp|ds` (matching host only). Foreign hrefs are ignored so one bookmark cannot wipe another channel.
 
 1. **Sync FP ranks** — click on `draftwizard.fantasypros.com` / FantasyPros Draft Assistant or cheat sheet.
 2. **Sync DS ranks** — click on `draftsharks.com` Draft War Room (or league rankings).

@@ -238,6 +238,8 @@ export function DraftApp() {
   const extras = useMemo(() => data.extras ?? [], [data.extras]);
   const rankOverlay = data.rankOverlay;
   const leagueRanks = data.leagueRanks ?? {};
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   const setSettings = useCallback((next: LeagueSettings) => {
     writeStore({ ...dataRef.current, settings: next });
@@ -284,8 +286,6 @@ export function DraftApp() {
   const refreshingRef = useRef(false);
   const lastAutoPickCount = useRef(-1);
   const lastLeagueNudgeRound = useRef(-1);
-  const dataRef = useRef(data);
-  dataRef.current = data;
   const leagueRanksRef = useRef(leagueRanks);
   leagueRanksRef.current = leagueRanks;
   const settingsRef = useRef(settings);
