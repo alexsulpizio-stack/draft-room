@@ -7,6 +7,11 @@ var O=${O};
 var RELAY=${RELAY};
 var POLL=5000;
 var API="https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
+var host=(location.hostname||"").toLowerCase();
+if(!(host==="espn.com"||/\.espn\.com$/.test(host))){
+  alert("Sync ESPN only works on fantasy.espn.com (live draft / practice / mock). You are on "+(host||"this page")+". For FantasyPros or DraftSharks ranks, use Sync FP ranks / Sync DS ranks instead.");
+  return;
+}
 function takeSize(n){n=Number(n);return (n>=2&&n<=20)?n:0;}
 function urlMeta(){
   var meta={leagueId:"",season:0,teamId:0,teams:0,leagueName:"",draftType:"snake",teamNames:null,pickOrder:null,slot:0,draftId:""};

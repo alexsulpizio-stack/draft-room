@@ -1234,6 +1234,18 @@ export function isEspnBrowserOrigin(origin: string): boolean {
   }
 }
 
+/** Accept ESPN draft captures and manual paste logs; reject FP/DS scrapes that land on the ESPN ingest channel. */
+export function isAllowedEspnIngestHref(href: unknown): boolean {
+  if (typeof href !== "string" || !href.trim()) return false;
+  if (href === "paste" || href === "cleared") return true;
+  try {
+    const host = new URL(href).hostname.toLowerCase();
+    return host === "espn.com" || host.endsWith(".espn.com");
+  } catch {
+    return /espn\.com/i.test(href);
+  }
+}
+
 export function isLoopbackOrigin(origin: string): boolean {
   try {
     const host = new URL(origin).hostname.toLowerCase();

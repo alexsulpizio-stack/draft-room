@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   clampEspnPickOrder,
   extrasFromMapped,
+  isAllowedEspnIngestHref,
   loadEspnPlayers,
   mapEspnPicks,
   mergeIngestMeta,
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
   await pullRelayIntoIngest();
   let last = getIngest();
   const href = last?.href ?? "";
-  if (last?.picks.length && href !== "paste" && !/espn\.com/i.test(href)) {
+  if (last?.picks.length && href !== "paste" && !isAllowedEspnIngestHref(href)) {
     clearIngest();
     last = null;
   }

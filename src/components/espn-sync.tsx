@@ -384,29 +384,54 @@ export function EspnSync({
       }
       if (!json.ingest || !json.picks?.length) {
         const meta = json.meta ?? {};
+        const hadLivePicks = statusRef.current.pickCount > 0;
         if (json.connected || meta.leagueName || meta.leagueId) {
           const label = meta.leagueName || `League ${meta.leagueId}`;
           const nextSettings = patchSettingsFromEspnMeta(settingsRef.current, meta);
           const waitSig = `wait:${meta.leagueId ?? ""}:${meta.slot ?? ""}:${meta.teams ?? ""}`;
-          if (listenSig.current !== waitSig) {
+          // Connected-with-0 is fine before the draft starts. Mid-draft, a transient empty
+          // listen (e.g. foreign bookmarklet pollution) must not wipe the board.
+          if (!hadLivePicks && listenSig.current !== waitSig) {
             listenSig.current = waitSig;
             onPicksRef.current([], [], nextSettings);
           }
-          setIngestHint(
-            `Connected to ${label}, but no player names came through yet. If ESPN already shows picks, copy the pick history and paste it in step 3.`,
-          );
-          setStatus({
-            live: true,
-            source: "room-capture",
-            pickCount: 0,
-            leagueName: label,
-          });
+          if (!hadLivePicks) {
+            setIngestHint(
+              `Connected to ${label}, but no player names came through yet. If ESPN already shows picks, copy the pick history and paste it in step 3.`,
+            );
+            setStatus({
+              live: true,
+              source: "room-capture",
+              pickCount: 0,
+              leagueName: label,
+            });
+          } else {
+            setIngestHint(
+              `Still connected to ${label}, but the room capture went quiet. Keeping ${statusRef.current.pickCount} picks — re-click Sync ESPN on the ESPN draft tab if this sticks.`,
+            );
+            setStatus({
+              ...statusRef.current,
+              live: true,
+              source: "room-capture",
+              leagueName: label,
+              warning: "Room capture temporarily empty — picks held.",
+            });
+          }
           return;
         }
         const why = json.reason || meta.reason;
         if (why) setIngestHint(why);
         else setIngestHint(null);
         if (listenSig.current || statusRef.current.source === "room-capture") {
+          // Do not wipe an in-progress draft when listen briefly returns empty.
+          if (hadLivePicks) {
+            setStatus({
+              ...statusRef.current,
+              live: false,
+              warning: "Lost ESPN room capture — waiting for Sync ESPN on fantasy.espn.com…",
+            });
+            return;
+          }
           listenSig.current = "";
           onPicksRef.current([], [], settingsRef.current);
           setStatus({ live: false, source: "empty", pickCount: 0 });
@@ -585,9 +610,10 @@ export function EspnSync({
             <SheetDescription>
               The Sync ESPN chip in Draft Room only opens this help — it does not read ESPN. Sync
               starts when you click the <span className="font-medium text-foreground">Sync ESPN</span>{" "}
-              bookmark on the ESPN draft tab. No green badge on ESPN means that bookmark did not
+              bookmark on the ESPN draft tab (not FantasyPros / DraftSharks — use Sync FP/DS ranks
+              there). No green badge on ESPN means that bookmark did not
               run — delete the old one, copy the script below, save it as the bookmark URL, then
-              click it on ESPN.
+              click it on fantasy.espn.com.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">

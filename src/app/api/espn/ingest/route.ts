@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
+import { espnPlayerIdOrZero, extractEspnDraftPicks, ingestCorsHeaders, isAllowedEspnIngestHref, isPlaceholderEspnName, isValidEspnPlayerId, mergeIngestMeta, parseEspnPickLog, requestPublicOrigin, type EspnIngestMeta, type EspnRawPick } from "@/lib/espn";
 import { getIngest, setIngest } from "@/lib/espn-ingest";
 import { getRelayTopic, relayUrl } from "@/lib/espn-relay";
 
@@ -68,9 +68,22 @@ export async function POST(req: Request) {
   } catch {
     return cors(req, { ok: false, error: "Invalid JSON." }, 400);
   }
+  const href = typeof body.href === "string" ? body.href : undefined;
+  // Sync ESPN bookmarklet used to run on FantasyPros / DraftSharks tabs and overwrite
+  // real ESPN picks; listen then cleared non-espn.com captures and the UI wiped the board.
+  if (href && !isAllowedEspnIngestHref(href)) {
+    const previous = getIngest();
+    return cors(req, {
+      ok: true,
+      ignoredForeign: true,
+      count: previous?.picks.length ?? 0,
+      error: "ESPN ingest only accepts fantasy.espn.com (or paste). Use Sync FP/DS ranks for those sites.",
+      meta: previous?.meta,
+    });
+  }
   const meta = mergeIngestMeta(
     body.meta,
-    typeof body.href === "string" ? body.href : undefined,
+    href,
     typeof body.title === "string" ? body.title : undefined,
   );
   let picks = normalizePicks(body.picks);
@@ -86,7 +99,7 @@ export async function POST(req: Request) {
   }
   setIngest({
     picks,
-    href: typeof body.href === "string" ? body.href : undefined,
+    href,
     title: typeof body.title === "string" ? body.title : undefined,
     ts: Date.now(),
     meta,

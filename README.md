@@ -62,6 +62,8 @@ JFL 28 on ESPN:
 
 Works with **any** live ESPN draft — JFL 28, another league, a mock, or a practice room. After a Draft Room update you **must reinstall** the bookmark (Chrome often keeps a stale script, or even a dead `#` URL).
 
+**Only click Sync ESPN on fantasy.espn.com.** Clicking it on FantasyPros or DraftSharks scrapes those UIs into the ESPN channel, clears room capture, and can wipe the board. Use **Sync FP ranks** / **Sync DS ranks** for those sites.
+
 1. In Draft Room, click **Sync ESPN** (that chip only opens this help). Copy the script. Chrome → Ctrl+Shift+B → right-click the bookmarks bar → Add page → Name: `Sync ESPN` → URL: paste the script → Save. Delete any older Sync ESPN bookmark first.
 2. Open the ESPN draft tab and click that bookmark. A green badge should appear on ESPN. Leave the tab open. Picks also go through a public relay (`ntfy.sh/drjfl28jackal`) so ESPN on your PC can reach a Cloud preview.
 3. If the badge says **0 picks** but names are already on the ESPN board (common in practice drafts — ESPN leaves `playerId` empty), copy the pick history from ESPN and paste it as step 3 in Draft Room. Lines like `1.01 Jahmyr Gibbs` or `1.02 Puka Nacua, WR, LAR` work.

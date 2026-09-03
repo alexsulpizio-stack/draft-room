@@ -310,6 +310,17 @@ assert(bm.includes("(\\d{1,2})\\.(\\d{1,2})\\b"), "bookmarklet keeps pick-number
 assert(!bm.includes("/^ESPNs+-?d+$"), "bookmarklet must not cook \\\\s/\\\\d away");
 assert(!bm.includes(".replace(/s+/g"), "bookmarklet must not collapse the letter s");
 assert(bm.includes("takeReactPicks") && bm.includes("takeBoardPicks") && bm.includes("readText"), "scrape fallbacks present");
+assert(
+  bm.includes('host==="espn.com"') || bm.includes('host==="espn.com"||'),
+  "bookmarklet refuses non-ESPN hosts",
+);
+assert(bm.includes("Sync FP ranks") || bm.includes("Sync DS ranks"), "bookmarklet points users at FP/DS bookmarks");
+
+const { isAllowedEspnIngestHref } = require("../src/lib/espn") as typeof import("../src/lib/espn");
+assert(isAllowedEspnIngestHref("https://fantasy.espn.com/football/draft?leagueId=1"), "espn href allowed");
+assert(isAllowedEspnIngestHref("paste"), "paste href allowed");
+assert(!isAllowedEspnIngestHref("https://draftwizard.fantasypros.com/d/rdr.jsp"), "FP href rejected");
+assert(!isAllowedEspnIngestHref("https://www.draftsharks.com/war-room"), "DS href rejected");
 
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);
