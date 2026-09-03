@@ -391,7 +391,9 @@ export function EspnSync({
             listenSig.current = waitSig;
             onPicksRef.current([], [], nextSettings);
           }
-          setIngestHint(`Connected to ${label}. ESPN has not filled a pick yet.`);
+          setIngestHint(
+            `Connected to ${label}, but no player names came through yet. If ESPN already shows picks, copy the pick history and paste it in step 3.`,
+          );
           setStatus({
             live: true,
             source: "room-capture",
@@ -712,6 +714,30 @@ export function EspnSync({
                   <p className="mt-2 text-xs text-muted-foreground">Waiting for the first sync…</p>
                 )}
               </li>
+              <li className="rounded-xl border border-border bg-card p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  3 · Paste pick history (if the board stays empty)
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Practice drafts often leave ESPN&apos;s API slots empty even when names are on
+                  screen. Copy the pick list from ESPN and paste it here — Draft Room will mark
+                  those players taken.
+                </p>
+                <textarea
+                  value={pasteLog}
+                  onChange={(e) => setPasteLog(e.target.value)}
+                  placeholder={"1.01 Jahmyr Gibbs\n1.02 Puka Nacua\n2. Ja'Marr Chase, WR, CIN"}
+                  className="mt-3 min-h-28 w-full rounded-xl border border-input bg-background p-3 font-mono text-xs"
+                />
+                <Button
+                  variant="outline"
+                  className="mt-2"
+                  onClick={applyPaste}
+                  disabled={!pasteLog.trim()}
+                >
+                  Ingest pick log
+                </Button>
+              </li>
             </ol>
 
             <div>
@@ -720,7 +746,7 @@ export function EspnSync({
                 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
                 onClick={() => setAdvanced((v) => !v)}
               >
-                {advanced ? "Hide" : "Show"} cookies & paste (optional)
+                {advanced ? "Hide" : "Show"} cookies (optional)
               </button>
               {advanced ? (
                 <div className="mt-3 grid gap-4">
@@ -795,18 +821,6 @@ export function EspnSync({
                       </select>
                     </label>
                   ) : null}
-                  <div className="grid gap-2">
-                    <Label>Or paste ESPN pick history</Label>
-                    <textarea
-                      value={pasteLog}
-                      onChange={(e) => setPasteLog(e.target.value)}
-                      placeholder={"1.01 Jahmyr Gibbs\n1.02 Puka Nacua\n2. Ja'Marr Chase, WR, CIN"}
-                      className="min-h-28 w-full rounded-xl border border-input bg-background p-3 font-mono text-xs"
-                    />
-                    <Button variant="outline" onClick={applyPaste} disabled={!pasteLog.trim()}>
-                      Ingest pick log
-                    </Button>
-                  </div>
                 </div>
               ) : null}
             </div>

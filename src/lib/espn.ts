@@ -1438,23 +1438,160 @@ function takePicks(json){
   }
   return out;
 }
+function pushPick(out,seen,overall,playerId,teamId,name){
+  playerId=Number(playerId||0); if(!(playerId>0)) playerId=0;
+  name=String(name||"").replace(/\s+/g," ").trim();
+  if(/^ESPN\s+-?\d+$/i.test(name)) name="";
+  if(!playerId&&name.length<3) return;
+  var key=playerId?("id:"+playerId):("n:"+name.toLowerCase());
+  if(seen[key]) return;
+  seen[key]=1;
+  out.push({overallPickNumber:Number(overall)||out.length+1,playerId:playerId,teamId:Number(teamId||0),playerName:name});
+}
+function considerPickArr(arr,out,seen){
+  if(!Array.isArray(arr)||arr.length<1||arr.length>400) return;
+  var sample=arr[0];
+  if(!sample||typeof sample!=="object") return;
+  if(!("overallPickNumber" in sample)&&!("overall" in sample)&&!("pickNumber" in sample)&&!("playerId" in sample)&&!("player" in sample)) return;
+  var hits=0,i,p;
+  for(i=0;i<Math.min(arr.length,300);i++){
+    p=arr[i]; if(!p||typeof p!=="object") continue;
+    if((Number(p.overallPickNumber||p.overall||p.pickNumber||0)>0)&&(pid(p)>0||pname(p,{}))) hits++;
+  }
+  if(hits<1) return;
+  for(i=0;i<Math.min(arr.length,300);i++){
+    p=arr[i]; if(!p||typeof p!=="object") continue;
+    var overall=Number(p.overallPickNumber||p.overall||p.pickNumber||0);
+    var playerId=pid(p);
+    var name=pname(p,{});
+    if(!overall||(!playerId&&!name)) continue;
+    var team=p.team&&typeof p.team==="object"?p.team.id:p.teamId;
+    pushPick(out,seen,overall,playerId,team,name);
+  }
+}
+/** Practice/mock rooms often keep real picks only in React props, not mDraftDetail. */
+function takeReactPicks(){
+  var out=[], seen={}, start=Date.now(), visited=0;
+  var roots=[document.getElementById("espn-root"),document.getElementById("root"),document.querySelector("#arena-root"),document.querySelector("[data-reactroot]"),document.body];
+  function walkFiber(fiber,depth){
+    if(!fiber||depth>45||visited>450||Date.now()-start>45||out.length>0) return;
+    visited++;
+    try{
+      var props=fiber.memoizedProps||fiber.pendingProps;
+      if(props&&typeof props==="object"){
+        if(props.picks) considerPickArr(props.picks,out,seen);
+        if(props.draftPicks) considerPickArr(props.draftPicks,out,seen);
+        if(props.selections) considerPickArr(props.selections,out,seen);
+        if(props.draftDetail&&props.draftDetail.picks) considerPickArr(props.draftDetail.picks,out,seen);
+        if(props.draft&&props.draft.picks) considerPickArr(props.draft.picks,out,seen);
+        if(props.value&&typeof props.value==="object"){
+          if(props.value.picks) considerPickArr(props.value.picks,out,seen);
+          if(props.value.draftDetail&&props.value.draftDetail.picks) considerPickArr(props.value.draftDetail.picks,out,seen);
+        }
+        for(var k in props){
+          if(k==="children"||k==="ref") continue;
+          var v=props[k];
+          if(Array.isArray(v)) considerPickArr(v,out,seen);
+          else if(v&&typeof v==="object"&&v.picks) considerPickArr(v.picks,out,seen);
+        }
+      }
+      var state=fiber.memoizedState, guard=0;
+      while(state&&guard++<25&&!out.length){
+        var ms=state.memoizedState;
+        if(Array.isArray(ms)) considerPickArr(ms,out,seen);
+        else if(ms&&typeof ms==="object"){
+          if(ms.picks) considerPickArr(ms.picks,out,seen);
+          if(ms.draftDetail&&ms.draftDetail.picks) considerPickArr(ms.draftDetail.picks,out,seen);
+          if(ms.draft&&ms.draft.picks) considerPickArr(ms.draft.picks,out,seen);
+        }
+        state=state.next;
+      }
+    }catch(e){}
+    if(!out.length) walkFiber(fiber.child,depth+1);
+    if(!out.length) walkFiber(fiber.sibling,depth+1);
+  }
+  for(var r=0;r<roots.length&&!out.length;r++){
+    var el=roots[r]; if(!el) continue;
+    var keys=Object.keys(el);
+    for(var i=0;i<keys.length;i++){
+      if(keys[i].indexOf("__reactFiber")===0||keys[i].indexOf("__reactInternalInstance")===0){
+        walkFiber(el[keys[i]],0);
+        if(out.length) break;
+      }
+    }
+  }
+  if(out.length) out.sort(function(a,b){return a.overallPickNumber-b.overallPickNumber;});
+  return out;
+}
 function takeDomPicks(){
-  var out=[], seen={}, i, a, href, id, name, m;
-  var links=document.querySelectorAll('a[href*="/player/_/id/"], a[href*="playerId="]');
+  var out=[], seen={}, i, a, href, id, name, m, el, attr;
+  var links=document.querySelectorAll('a[href*="/player/_/id/"], a[href*="/player/_/id/"], a[href*="playerId="], a[href*="playerid="]');
   for(i=0;i<links.length&&out.length<80;i++){
     a=links[i];
     href=a.getAttribute("href")||"";
-    m=href.match(/\/player\/_\/id\/(\d+)/)||href.match(/[?&]playerId=(\d+)/);
+    m=href.match(/\/player\/_\/id\/(\d+)/)||href.match(/\/player\/_\/id\/(\d+)/)||href.match(/[?&#]playerId=(\d+)/i);
     id=m?Number(m[1]):0;
     name=(a.textContent||"").replace(/\s+/g," ").trim();
-    if(/^ESPN\s+-?\d+$/i.test(name)) name="";
-    if(!(id>0)&&name.length<3) continue;
-    var key=id?("id:"+id):("n:"+name.toLowerCase());
-    if(seen[key]) continue;
-    seen[key]=1;
-    out.push({overallPickNumber:out.length+1,playerId:id,teamId:0,playerName:name});
+    pushPick(out,seen,out.length+1,id,0,name);
+  }
+  var nodes=document.querySelectorAll("[data-player-id],[data-playerid],[data-entity-id],[data-id]");
+  for(i=0;i<nodes.length&&out.length<80;i++){
+    el=nodes[i];
+    attr=el.getAttribute("data-player-id")||el.getAttribute("data-playerid")||el.getAttribute("data-entity-id")||"";
+    id=Number(attr)||0;
+    if(!(id>1000)) continue;
+    name=(el.getAttribute("aria-label")||el.textContent||"").replace(/\s+/g," ").trim();
+    if(name.length>60) name=name.slice(0,60);
+    pushPick(out,seen,out.length+1,id,0,name);
   }
   return out;
+}
+function parsePickText(text){
+  text=String(text||"");
+  if(text.length<8) return [];
+  var out=[], seen={}, re=/(\d+)\.(\d{2})\s+([A-Za-z][A-Za-z.'’\-]+(?:\s+[A-Za-z][A-Za-z.'’\-]+){0,3})/g, m;
+  while((m=re.exec(text))&&out.length<80){
+    var overall=(Number(m[1])-1)*((lastMeta&&lastMeta.teams)||12)+Number(m[2]);
+    pushPick(out,seen,overall,0,0,m[3]);
+  }
+  if(out.length) return out;
+  re=/\b(?:Pick\s*)?(\d{1,3})[\.:)\-]\s+([A-Za-z][A-Za-z.'’\-]+(?:\s+[A-Za-z][A-Za-z.'’\-]+){0,3})/g;
+  while((m=re.exec(text))&&out.length<80){
+    pushPick(out,seen,Number(m[1]),0,0,m[2]);
+  }
+  return out;
+}
+/** Scrape pick-history / board text when JSON slots stay empty (common in practice drafts). */
+function takeTextPicks(){
+  var chunks=[], i, el, text="";
+  var nodes=document.querySelectorAll('[class*="pick"],[class*="Pick"],[class*="history"],[class*="History"],[class*="draftLog"],[class*="DraftLog"],[data-testid*="pick"],aside,[role="complementary"]');
+  for(i=0;i<nodes.length&&chunks.length<40;i++){
+    el=nodes[i];
+    var t=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim();
+    if(t.length>=8&&t.length<4000) chunks.push(t);
+  }
+  text=chunks.join("\n");
+  if(text.length<20){
+    var board=document.querySelector('[class*="draft"],[class*="Draft"],main');
+    if(board) text=(board.innerText||"").slice(0,12000);
+  }
+  return parsePickText(text);
+}
+function takeAllPicks(json){
+  var got=json?takePicks(json):[];
+  if(!got.length) got=takeReactPicks();
+  if(!got.length) got=takeDomPicks();
+  if(!got.length) got=takeTextPicks();
+  return got;
+}
+function tryClipboard(meta){
+  try{
+    if(!navigator.clipboard||typeof navigator.clipboard.readText!=="function") return;
+    navigator.clipboard.readText().then(function(text){
+      var picks=parsePickText(text);
+      if(picks.length) post(picks,meta||lastMeta||urlMeta());
+    }).catch(function(){});
+  }catch(e){}
 }
 function isLeaguePayload(json){
   json=unwrap(json);
@@ -1483,7 +1620,7 @@ function badge(n,meta,err){
     return;
   }
   if(waiting){
-    b.textContent="Draft Room connected to "+label+" · 0 picks · waiting · "+clock;
+    b.textContent="Draft Room connected to "+label+" · 0 picks · if ESPN shows names, copy pick history & paste in Draft Room · "+clock;
     return;
   }
   b.textContent="Draft Room · 0 picks — "+(why||emptyWhy(meta))+" · "+clock;
@@ -1492,7 +1629,7 @@ function idle(fn){
   if(typeof requestIdleCallback==="function") requestIdleCallback(function(){fn();},{timeout:1500});
   else setTimeout(fn,0);
 }
-var sending=false,lastSig="",lastMeta=urlMeta(),pending=null;
+var sending=false,lastSig="",lastMeta=urlMeta(),pending=null,lastBeat=0;
 function flushPending(){
   if(!pending) return;
   var n=pending; pending=null;
@@ -1500,7 +1637,7 @@ function flushPending(){
 }
 function pack(picks,meta){
   var rows=[],i,p;
-  for(i=0;i<picks.length;i++){
+  for(i=0;i<(picks||[]).length;i++){
     p=picks[i];
     rows.push([p.overallPickNumber,p.playerId||0,p.teamId||0,p.playerName||""]);
   }
@@ -1512,8 +1649,8 @@ function pack(picks,meta){
   return packed;
 }
 function postRelay(picks,meta){
-  if(!RELAY||!picks||!picks.length) return;
-  try{fetch(RELAY,{method:"POST",headers:{"Content-Type":"text/plain"},body:pack(picks,meta),mode:"cors",keepalive:true}).catch(function(){});}catch(e){}
+  if(!RELAY) return;
+  try{fetch(RELAY,{method:"POST",headers:{"Content-Type":"text/plain"},body:pack(picks||[],meta),mode:"cors",keepalive:true}).catch(function(){});}catch(e){}
 }
 function post(picks,meta,err){
   lastMeta=meta;
@@ -1524,12 +1661,15 @@ function post(picks,meta,err){
     hmeta.reason=why;
     badge(0,hmeta,why);
     var hsig="0:"+why+":"+(meta&&meta.leagueId||"");
-    if(hsig===lastSig){ badge(0,hmeta,why); return; }
+    var now=Date.now();
+    if(hsig===lastSig&&now-lastBeat<25000){ badge(0,hmeta,why); return; }
     lastSig=hsig;
+    lastBeat=now;
+    postRelay([],hmeta);
     fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({picks:[],href:location.href,title:document.title,ts:Date.now(),meta:hmeta}),mode:"cors",keepalive:true}).catch(function(){});
     return;
   }
-  var sig=picks.length+":"+picks[picks.length-1].overallPickNumber+":"+picks[picks.length-1].playerId+":"+(meta.teams||"")+":"+(meta.leagueId||"");
+  var sig=picks.length+":"+picks[picks.length-1].overallPickNumber+":"+picks[picks.length-1].playerId+":"+(picks[picks.length-1].playerName||"")+":"+(meta.teams||"")+":"+(meta.leagueId||"");
   if(sig===lastSig){ badge(picks.length,meta); return; }
   postRelay(picks,meta);
   if(sending){ pending={picks:picks,meta:meta}; return; }
@@ -1551,8 +1691,7 @@ function ingestJson(json){
   json=unwrap(json);
   if(!json||typeof json!=="object") return;
   if(json.draftPick&&typeof json.draftPick==="object") json={picks:[json.draftPick]};
-  var got=takePicks(json);
-  if(!got.length) got=takeDomPicks();
+  var got=takeAllPicks(json);
   if(!got.length&&!isLeaguePayload(json)) return;
   var meta=applyLeague(json,lastMeta||urlMeta());
   post(got,meta);
@@ -1634,9 +1773,10 @@ function pullApi(){
     if(i>=urls.length){
       var n=(lastSig&&lastSig.charAt(0)!=="0"&&Number(lastSig.split(":")[0]))||0;
       if(n){ badge(n,lastMeta||meta); return; }
-      var dom=takeDomPicks();
-      if(dom.length){ post(dom,lastMeta||meta); return; }
-      post([],lastMeta||meta,lastErr||"0 filled slots");
+      var scraped=takeAllPicks(null);
+      if(scraped.length){ post(scraped,lastMeta||meta); return; }
+      tryClipboard(lastMeta||meta);
+      post([],lastMeta||meta,lastErr||"0 filled slots — copy ESPN pick history, then click Sync ESPN again or paste in Draft Room");
       return;
     }
     var url=urls[i++];

@@ -88,6 +88,8 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
     const text = await res.text();
     if (!text.trim()) return false;
     let best: { picks: EspnRawPick[]; meta?: EspnIngestMeta; href?: string; ts: number } | null = null;
+    let heartbeat: { picks: EspnRawPick[]; meta?: EspnIngestMeta; href?: string; ts: number } | null =
+      null;
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       let msg: NtfyLine;
@@ -99,18 +101,47 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
       if (msg.event && msg.event !== "message") continue;
       if (!msg.message) continue;
       const unpacked = unpackRelayMessage(msg.message);
-      if (!unpacked?.picks.length) continue;
+      if (!unpacked) continue;
       if (!unpacked.href || !/espn\.com/i.test(unpacked.href)) continue;
-      if (!best || unpacked.ts >= best.ts) best = unpacked;
+      if (unpacked.picks.length) {
+        if (!best || unpacked.ts >= best.ts) best = unpacked;
+      } else if (unpacked.meta || unpacked.href) {
+        if (!heartbeat || unpacked.ts >= heartbeat.ts) heartbeat = unpacked;
+      }
     }
-    if (!best) return false;
     const current = getIngest();
-    if (current && current.picks.length >= best.picks.length && current.ts >= best.ts) return false;
+    if (best) {
+      if (current && current.picks.length >= best.picks.length && current.ts >= best.ts) {
+        /* keep looking at heartbeat for a fresher connected stamp */
+      } else {
+        setIngest({
+          picks: best.picks,
+          href: best.href,
+          ts: best.ts,
+          meta: best.meta,
+        });
+        return true;
+      }
+    }
+    if (!heartbeat) return false;
+    // Empty heartbeats keep "connected" fresh without wiping real picks.
+    if (current?.picks.length) {
+      if (heartbeat.ts <= current.ts) return false;
+      setIngest({
+        picks: current.picks,
+        href: current.href || heartbeat.href,
+        title: current.title,
+        ts: heartbeat.ts,
+        meta: { ...current.meta, ...heartbeat.meta },
+      });
+      return true;
+    }
+    if (current && current.ts >= heartbeat.ts) return false;
     setIngest({
-      picks: best.picks,
-      href: best.href,
-      ts: best.ts,
-      meta: best.meta,
+      picks: [],
+      href: heartbeat.href,
+      ts: heartbeat.ts,
+      meta: heartbeat.meta,
     });
     return true;
   } catch {
