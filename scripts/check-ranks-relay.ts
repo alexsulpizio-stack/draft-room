@@ -66,6 +66,30 @@ const espnBody = JSON.stringify({
 assert.equal(unpackRanksRelayMessage(espnBody), null);
 assert.equal(selectBestRankSnapshots([espnBody]).fp, undefined);
 
+const validFp = JSON.stringify({
+  v: 2,
+  s: "fp",
+  t: 1000,
+  h: "https://draftwizard.fantasypros.com/football/mock-draft-simulator/",
+  i: 0,
+  n: 1,
+  r: rows.map((r) => [r.rank, r.name, r.pos, r.team]),
+});
+const newerForeignFp = JSON.stringify({
+  v: 2,
+  s: "fp",
+  t: 9000,
+  h: "https://fantasy.espn.com/football/draft",
+  i: 0,
+  n: 1,
+  r: rows.map((r) => [r.rank, r.name, r.pos, r.team]),
+});
+const picked = selectBestRankSnapshots([validFp, newerForeignFp]);
+assert.ok(picked.fp);
+assert.equal(picked.fp.href, "https://draftwizard.fantasypros.com/football/mock-draft-simulator/");
+assert.equal(picked.fp.ts, 1000);
+assert.equal(picked.fp.rows[0].name, "Ja'Marr Chase");
+
 clearRanksIngest();
 const parsed = parseRankingPaste(
   ["RK,PLAYER,POS,TEAM", ...rows.map((r) => `${r.rank},${r.name},${r.pos},${r.team}`)].join("\n"),

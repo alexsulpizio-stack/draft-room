@@ -59,12 +59,22 @@ async function mappedPayload(last: NonNullable<ReturnType<typeof getIngest>>, fa
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const fallbackTeams = Number(url.searchParams.get("teams")) || 12;
-  // Drop foreign scrapes before relay merge so FP/DS pollution cannot be blended
-  // into a later ESPN ntfy snapshot (mergeEspnPicks would otherwise keep bad rows).
+  // Drop leftover / foreign scrapes BEFORE relay merge so they cannot blend into
+  // a later ESPN ntfy snapshot (mergeEspnPicks would otherwise keep bad rows).
+  // Use allow-replay — block-relay after a test leftover would stamp ts=now and
+  // swallow the user's still-live ntfy messages even when a newer post arrives
+  // with a slightly older packed `t` (or the leftover clear ran after their last click).
   {
     const prior = getIngest();
     const priorHref = prior?.href ?? "";
-    if (prior && priorHref && priorHref !== "paste" && !isAllowedEspnIngestHref(priorHref)) {
+    const leftoverOrForeign =
+      Boolean(prior?.picks.length) && !isLiveEspnCaptureHref(prior?.href);
+    const foreignHref =
+      Boolean(priorHref) &&
+      priorHref !== "paste" &&
+      priorHref !== "cleared" &&
+      !isAllowedEspnIngestHref(priorHref);
+    if (leftoverOrForeign || foreignHref) {
       clearIngest("allow-replay");
     }
   }
@@ -76,8 +86,9 @@ export async function GET(req: Request) {
     last = null;
   }
   // Href-less test writes (e.g. check scripts) must not mark players taken.
+  // allow-replay so a NEWER bookmarklet/ntfy post still applies on the next pull.
   if (last && last.picks.length && !isLiveEspnCaptureHref(last.href)) {
-    clearIngest("block-relay");
+    clearIngest("allow-replay");
     last = getIngest();
   }
   const base = listenMeta(req);

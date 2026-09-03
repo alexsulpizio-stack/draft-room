@@ -453,7 +453,7 @@ function emptyWhy(meta,err){
   if(!meta||!meta.leagueId) return "no leagueId in this URL";
   return "0 filled slots";
 }
-function badge(n,meta,err){
+function badge(n,meta,err,msg){
   var b=document.getElementById("draft-room-sync");
   if(!b){
     b=document.createElement("div");
@@ -467,7 +467,7 @@ function badge(n,meta,err){
   var waiting=!n&&!!(meta&&(meta.leagueName||meta.leagueId));
   b.style.background=n||waiting?"#1f6a45":"#9b1c1c";
   if(n){
-    b.textContent="Draft Room is syncing "+n+" picks from "+label+" · "+clock;
+    b.textContent="Draft Room is syncing "+n+" picks from "+label+(msg?" · "+msg:"")+" · "+clock;
     return;
   }
   if(waiting){
@@ -500,8 +500,13 @@ function pack(picks,meta){
   return packed;
 }
 function postRelay(picks,meta){
-  if(!RELAY) return;
-  try{fetch(RELAY,{method:"POST",headers:{"Content-Type":"text/plain"},body:pack(picks||[],meta),mode:"cors",keepalive:true}).catch(function(){});}catch(e){}
+  if(!RELAY) return Promise.resolve(false);
+  try{
+    return fetch(RELAY,{method:"POST",headers:{"Content-Type":"text/plain"},body:pack(picks||[],meta),mode:"cors",keepalive:true}).then(function(r){
+      if(!r.ok) throw new Error("ntfy "+r.status);
+      return true;
+    }).catch(function(){return false;});
+  }catch(e){return Promise.resolve(false);}
 }
 function post(picks,meta,err){
   lastMeta=meta;
@@ -536,21 +541,26 @@ function post(picks,meta,err){
     }catch(e){}
     return;
   }
-  postRelay(picks,meta);
   if(sending){ pending={picks:picks,meta:meta}; return; }
   sending=true;
   lastSig=sig;
   var body=JSON.stringify({picks:picks,href:location.href,title:document.title,ts:Date.now(),meta:meta});
-  fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:body,mode:"cors",keepalive:true}).then(function(r){
-    sending=false;
+  var local=fetch(O+"/api/espn/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:body,mode:"cors",keepalive:true}).then(function(r){
     if(!r.ok) throw new Error("HTTP "+r.status);
-    badge(picks.length,meta);
-    flushPending();
-  }).catch(function(e){
-    sending=false;
-    badge(picks.length,meta);
-    flushPending();
+    return r.json();
   });
+  var relay=postRelay(picks,meta);
+  var localOk=false, viaRelay=false, left=2;
+  function done(){
+    sending=false;
+    if(localOk) badge(picks.length,meta,null,"live");
+    else if(viaRelay) badge(picks.length,meta,null,"via relay");
+    else badge(picks.length,meta,null,"retry");
+    flushPending();
+  }
+  function tick(){ left-=1; if(left<=0) done(); }
+  local.then(function(){ localOk=true; tick(); }, function(){ tick(); });
+  relay.then(function(ok){ viaRelay=!!ok; tick(); }, function(){ tick(); });
 }
 function ingestJson(json){
   json=unwrap(json);

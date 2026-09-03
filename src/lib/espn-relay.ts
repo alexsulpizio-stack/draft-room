@@ -1,6 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { isAllowedEspnIngestHref, mergeEspnPicks, type EspnIngestMeta, type EspnRawPick } from "./espn";
+import {
+  isAllowedEspnIngestHref,
+  isLiveEspnCaptureHref,
+  mergeEspnPicks,
+  type EspnIngestMeta,
+  type EspnRawPick,
+} from "./espn";
 import { setIngest, getIngest, type IngestPayload } from "./espn-ingest";
 import { ESPN_RELAY_TOPIC, NTFY_HOST } from "./relay-urls";
 
@@ -165,9 +171,10 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
       }
     }
     const raw = getIngest();
-    // Ignore in-memory foreign scrapes so relay cannot merge ESPN picks onto them.
+    // Keep a live ESPN/paste capture or an intentional cleared stamp (block-relay).
+    // Href-less leftover test writes and foreign scrapes must not merge with ntfy.
     const current =
-      raw && raw.href && raw.href !== "paste" && !isAllowedEspnIngestHref(raw.href) ? null : raw;
+      raw && (isLiveEspnCaptureHref(raw.href) || raw.href === "cleared") ? raw : null;
     const next = applyRelayToIngest(current, best, heartbeat);
     if (!next) return false;
     const same =

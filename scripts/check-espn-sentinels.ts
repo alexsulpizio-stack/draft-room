@@ -336,6 +336,20 @@ const staleIgnored = applyRelayToIngest(
 );
 assert(staleIgnored?.picks.length === 0 && staleIgnored.href === "cleared", "stale ntfy picks do not undo a clear");
 
+const newerAfterClear = applyRelayToIngest(
+  { picks: [], ts: 500, href: "cleared" },
+  {
+    picks: [{ overallPickNumber: 1, playerId: 0, teamId: 1, playerName: "Bijan Robinson" }],
+    href: "https://fantasy.espn.com/football/draft",
+    ts: 900,
+  },
+  null,
+);
+assert(
+  newerAfterClear?.picks.length === 1 && newerAfterClear.picks[0].playerName === "Bijan Robinson",
+  "newer ntfy applies after an intentional block-relay clear",
+);
+
 const replayAfterForeign = applyRelayToIngest(
   { picks: [], ts: 0, href: "cleared" },
   {
@@ -406,10 +420,13 @@ assert(relaySrc.includes("isAllowedEspnIngestHref"), "relay filters with isAllow
 const listenSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/listen/route.ts"), "utf8");
 assert(listenSrc.includes("Drop foreign scrapes before relay merge") || listenSrc.indexOf("isAllowedEspnIngestHref") !== listenSrc.lastIndexOf("isAllowedEspnIngestHref"), "listen clears foreign before relay");
 assert(listenSrc.includes("allow-replay"), "listen foreign clear allows relay replay");
+assert(!listenSrc.includes('clearIngest("block-relay")'), "href-less leftover must not stamp block-relay");
 assert(listenSrc.includes("stale"), "listen reports stale without wiping picks");
+assert(relaySrc.includes("isLiveEspnCaptureHref"), "relay ignores href-less leftover instead of merging");
 
 const bmKeep = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/lib/espn-bookmarklet.ts"), "utf8");
 assert(bmKeep.includes("nowKeep-lastBeat") || bmKeep.includes("Soft heartbeat"), "bookmarklet soft-heartbeat when sig unchanged");
+assert(bmKeep.includes("via relay"), "bookmarklet reports ntfy relay when localhost ingest fails");
 
 const ingestSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/ingest/route.ts"), "utf8");
 assert(ingestSrc.includes("heartbeat: true"), "ingest empty-with-prior refreshes as heartbeat");
@@ -417,7 +434,7 @@ assert(ingestSrc.includes("heartbeat: true"), "ingest empty-with-prior refreshes
 void configuredPublicOrigin;
 void originDiagnostics;
 
-clearIngest("block-relay");
+clearIngest("allow-replay");
 assert((getIngest()?.picks.length ?? 0) === 0, "sentinel check must not leave test picks on the live board");
 
 console.log("espn sentinel checks passed");

@@ -1,6 +1,6 @@
 import { NTFY_HOST, RANKS_RELAY_TOPIC } from "./relay-urls";
 import { commitRankScrape } from "./ranks-apply";
-import type { RankIngestRow } from "./ranks-ingest";
+import { isAllowedRanksIngestHref, type RankIngestRow } from "./ranks-ingest";
 import type { RankImportSource } from "./parse-import";
 
 export { RANKS_RELAY_TOPIC };
@@ -120,6 +120,9 @@ export function selectBestRankSnapshots(bodies: string[]): {
     if (!raw.trim()) continue;
     const unpacked = unpackRanksRelayMessage(raw);
     if (!unpacked || unpacked.rows.length === 0) continue;
+    // A newer test/wrong-site post (e.g. source=fp + espn.com href) must not
+    // hide an older real FantasyPros / DraftSharks snapshot.
+    if (unpacked.href && !isAllowedRanksIngestHref(unpacked.source, unpacked.href)) continue;
     const key = groupKey(unpacked.source, unpacked.ts);
     let g = groups.get(key);
     if (!g) {
