@@ -96,12 +96,13 @@ export async function POST(req: Request) {
   const previous = getIngest();
   // Empty body while we already have picks = keep-alive heartbeat. Refresh ts/meta; never wipe.
   if (!picks.length && previous?.picks.length) {
-    const nextMeta = {
-      ...previous.meta,
-      ...meta,
-      // Keep prior reason blanked so UI does not flash "0 filled slots" over a live board.
-      reason: undefined,
-    };
+    const nextMeta: EspnIngestMeta = { ...previous.meta };
+    for (const [k, v] of Object.entries(meta) as Array<[keyof EspnIngestMeta, EspnIngestMeta[keyof EspnIngestMeta]]>) {
+      if (v !== undefined && v !== null && k !== "reason") {
+        (nextMeta as Record<string, unknown>)[k] = v;
+      }
+    }
+    delete nextMeta.reason;
     setIngest({
       picks: previous.picks,
       href: href || previous.href,

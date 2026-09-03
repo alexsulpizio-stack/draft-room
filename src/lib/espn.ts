@@ -107,18 +107,27 @@ export function mergeIngestMeta(
     if (ix >= 0) slot = ix + 1;
   }
   // Do not treat raw ESPN teamId as draft slot — ids often differ from pick order.
-  return {
+  // Omit undefined keys so heartbeats / partial metas cannot wipe pickOrder or teams.
+  const next: EspnIngestMeta = {
     ...fromHref,
-    ...body,
-    leagueId: body?.leagueId || fromHref.leagueId,
-    season: body?.season || fromHref.season,
-    teamId,
-    teams,
-    pickOrder,
-    slot,
-    leagueName,
-    draftType: body?.draftType === "linear" ? "linear" : body?.draftType === "snake" ? "snake" : undefined,
   };
+  if (body) {
+    for (const [k, v] of Object.entries(body) as Array<[keyof EspnIngestMeta, EspnIngestMeta[keyof EspnIngestMeta]]>) {
+      if (v !== undefined && v !== null) (next as Record<string, unknown>)[k] = v;
+    }
+  }
+  next.leagueId = body?.leagueId || fromHref.leagueId;
+  next.season = body?.season || fromHref.season;
+  if (teamId) next.teamId = teamId;
+  if (teams) next.teams = teams;
+  if (pickOrder) next.pickOrder = pickOrder;
+  if (slot) next.slot = slot;
+  if (leagueName) next.leagueName = leagueName;
+  if (body?.draftType === "linear") next.draftType = "linear";
+  else if (body?.draftType === "snake") next.draftType = "snake";
+  if (body?.teamNames?.length) next.teamNames = body.teamNames;
+  if (body?.reason) next.reason = body.reason;
+  return next;
 }
 
 export function patchSettingsFromEspnMeta(

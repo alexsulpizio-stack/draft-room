@@ -155,4 +155,22 @@ assert(
   "pickOrder preserved on meta",
 );
 
+// Partial meta must not wipe an established pickOrder (heartbeat / empty scrape).
+const prior = mergeIngestMeta({
+  teams: 12,
+  teamId: 5,
+  pickOrder,
+  draftType: "snake",
+  leagueName: "JFL 28",
+  teamNames: Array.from({ length: 12 }, (_, i) => `T${i + 1}`),
+});
+const partial = mergeIngestMeta({ leagueId: "1361349772", reason: "0 filled slots" });
+const kept = { ...prior };
+for (const [k, v] of Object.entries(partial) as Array<[string, unknown]>) {
+  if (v !== undefined && v !== null) (kept as Record<string, unknown>)[k] = v;
+}
+assert(kept.pickOrder?.length === 12 && kept.pickOrder[0] === 8, "partial merge keeps pickOrder");
+assert(kept.teams === 12 && kept.slot === 5, "partial merge keeps teams/slot");
+assert(!(partial as { pickOrder?: number[] }).pickOrder, "partial mergeIngestMeta omits missing pickOrder");
+
 console.log("check-espn-pick-teams: ok");
