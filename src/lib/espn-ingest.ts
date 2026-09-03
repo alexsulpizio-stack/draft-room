@@ -64,14 +64,6 @@ export function getIngest(): IngestPayload | null {
 }
 
 export function clearIngest() {
-  last = null;
-  const empty = JSON.stringify({ picks: [], ts: 0 });
-  for (const file of INGEST_PATHS) {
-    try {
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, empty);
-    } catch {
-      /* next */
-    }
-  }
+  last = { picks: [], ts: Date.now(), href: "cleared" };
+  writeDisk(last);
 }

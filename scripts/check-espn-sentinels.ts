@@ -1,5 +1,7 @@
 import {
   bookmarkletOrigin,
+  buildBookmarklet,
+  cleanPickLogName,
   extractEspnDraftPicks,
   extrasFromMapped,
   ingestCorsHeaders,
@@ -10,6 +12,7 @@ import {
   mergeBoardWithEspnExtras,
   mergeEspnPicks,
   mergeLiveEspnFields,
+  parseEspnPickLog,
   remapMappedPicks,
   snapshotIdForEspnPick,
   stubFromEspn,
@@ -230,11 +233,83 @@ assert(
   `getIngest rereads newer disk payload, got ${JSON.stringify(afterDisk?.picks)}`,
 );
 
-const { unpackRelayMessage } = require("../src/lib/espn-relay") as typeof import("../src/lib/espn-relay");
+const { unpackRelayMessage, applyRelayToIngest } = require("../src/lib/espn-relay") as typeof import("../src/lib/espn-relay");
 const packed = unpackRelayMessage(
   JSON.stringify({ v: 1, p: [[1, 4241457, 5, "Ja'Marr Chase"]], t: Date.now() }),
 );
 assert(packed?.picks[0]?.playerId === 4241457 && packed.picks[0].playerName === "Ja'Marr Chase", "unpack relay");
+
+const emptyBeat = unpackRelayMessage(
+  JSON.stringify({
+    v: 1,
+    p: [],
+    m: { leagueId: "96402745", reason: "0 filled slots" },
+    h: "https://fantasy.espn.com/football/draft?leagueId=96402745",
+    t: Date.now(),
+  }),
+);
+assert(emptyBeat && emptyBeat.picks.length === 0 && emptyBeat.href?.includes("espn.com"), "empty heartbeat unpacks");
+
+const nameOnly = unpackRelayMessage(
+  JSON.stringify({
+    v: 1,
+    p: [
+      [1, 0, 1, "Ja'Marr Chase"],
+      [2, 0, 2, "Bijan Robinson"],
+    ],
+    h: "https://fantasy.espn.com/football/draft?leagueId=96402745",
+    t: Date.now(),
+  }),
+);
+assert(
+  nameOnly?.picks.length === 2 && nameOnly.picks[0].playerId === 0 && nameOnly.picks[0].playerName === "Ja'Marr Chase",
+  "name-only relay rows survive unpack",
+);
+
+const afterBeat = applyRelayToIngest(
+  {
+    picks: [{ overallPickNumber: 1, playerId: 0, teamId: 1, playerName: "Ja'Marr Chase" }],
+    ts: 100,
+    href: "https://fantasy.espn.com/football/draft",
+  },
+  null,
+  {
+    picks: [],
+    href: "https://fantasy.espn.com/football/draft",
+    ts: 200,
+    meta: { reason: "0 filled slots" },
+  },
+);
+assert(afterBeat?.picks.length === 1 && afterBeat.picks[0].playerName === "Ja'Marr Chase", "heartbeat does not wipe picks");
+assert(afterBeat?.ts === 200, "heartbeat refreshes connected ts");
+
+const staleIgnored = applyRelayToIngest(
+  { picks: [], ts: 500, href: "cleared" },
+  {
+    picks: [{ overallPickNumber: 1, playerId: 0, teamId: 1, playerName: "Ja'Marr Chase" }],
+    href: "https://fantasy.espn.com/football/draft",
+    ts: 100,
+  },
+  null,
+);
+assert(staleIgnored?.picks.length === 0 && staleIgnored.href === "cleared", "stale ntfy picks do not undo a clear");
+
+assert(cleanPickLogName("Ja'Marr Chase WR CIN") === "Ja'Marr Chase", "strip pos/team from scraped name");
+assert(cleanPickLogName("Ja'Marr Chase, WR, CIN") === "Ja'Marr Chase", "comma pos/team after name");
+assert(cleanPickLogName("Chase, Ja'Marr") === "Ja'Marr Chase", "flip last, first");
+const log = parseEspnPickLog("1.01 Ja'Marr Chase WR CIN 1.02 Bijan Robinson RB ATL", 12);
+assert(log.length === 2, `collapsed pick log parsed, got ${log.length}`);
+assert(log[0].playerName === "Ja'Marr Chase" && log[1].playerName === "Bijan Robinson", "collapsed names match snapshot");
+assert(log[0].overallPickNumber === 1 && log[1].overallPickNumber === 2, "1.01 / 1.02 overalls");
+
+const bm = buildBookmarklet("http://127.0.0.1:43173", "https://ntfy.sh/drjfl28jackal");
+assert(bm.startsWith("javascript:"), "bookmarklet protocol");
+assert(bm.includes("/\\s+/g"), "bookmarklet keeps \\\\s whitespace regex");
+assert(bm.includes("^ESPN\\s+-?\\d+$"), "bookmarklet keeps ESPN placeholder regex");
+assert(bm.includes("(\\d{1,2})\\.(\\d{1,2})\\b"), "bookmarklet keeps pick-number regex");
+assert(!bm.includes("/^ESPNs+-?d+$"), "bookmarklet must not cook \\\\s/\\\\d away");
+assert(!bm.includes(".replace(/s+/g"), "bookmarklet must not collapse the letter s");
+assert(bm.includes("takeReactPicks") && bm.includes("takeBoardPicks") && bm.includes("readText"), "scrape fallbacks present");
 
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);

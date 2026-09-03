@@ -61,10 +61,11 @@ export async function GET(req: Request) {
     });
   }
   if (!last.picks.length) {
+    const connected = Boolean(last.href && /espn\.com/i.test(last.href));
     return NextResponse.json({
       ok: true,
       ingest: false,
-      connected: true,
+      connected,
       stale: false,
       source: "empty",
       picks: [],

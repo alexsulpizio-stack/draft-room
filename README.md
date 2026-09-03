@@ -37,14 +37,15 @@ JFL 28 on ESPN:
 
 ## ESPN live sync
 
-Works with **any** live ESPN draft — JFL 28, another league, or a mock. Two steps. No cookies.
+Works with **any** live ESPN draft — JFL 28, another league, a mock, or a practice room. After a Draft Room update you **must reinstall** the bookmark (Chrome often keeps a stale script, or even a dead `#` URL).
 
-1. Drag the green **Sync ESPN** chip onto the Chrome bookmarks bar (Ctrl+Shift+B if the bar is hidden). After a Draft Room update, delete the old bookmark and drag it again — stale bookmarks miss live picks.
-2. Open whatever ESPN draft tab is live (mock lobby, live lobby, or a league room) and click that bookmark. Leave the tab open. The green chip’s clock should tick; pick count rises as ESPN fills slots. Picks also go through a public relay so ESPN on your PC can reach a Cloud preview that is not on localhost.
+1. In Draft Room, click **Sync ESPN** (that chip only opens this help). Copy the script. Chrome → Ctrl+Shift+B → right-click the bookmarks bar → Add page → Name: `Sync ESPN` → URL: paste the script → Save. Delete any older Sync ESPN bookmark first.
+2. Open the ESPN draft tab and click that bookmark. A green badge should appear on ESPN. Leave the tab open. Picks also go through a public relay (`ntfy.sh/drjfl28jackal`) so ESPN on your PC can reach a Cloud preview.
+3. If the badge says **0 picks** but names are already on the ESPN board (common in practice drafts — ESPN leaves `playerId` empty), copy the pick history from ESPN and paste it as step 3 in Draft Room. Lines like `1.01 Jahmyr Gibbs` or `1.02 Puka Nacua, WR, LAR` work.
 
-Draft Room reads league ID, season, team count, league name, draft type, and your slot (`teamId`) from that page, then fills the board as picks come in. Click the chip in Draft Room anytime for this reminder.
+Draft Room reads league ID, season, team count, league name, draft type, and your slot (`teamId`) from that page, then marks those players taken on the board.
 
-Cookies and a pasted pick log still exist under **Show cookies & paste** if a browser blocks the bookmark. Defaults stay **JackAL, pick 5** in JFL 28 until you sync a different room.
+Cookies still exist under **Show cookies** if a browser blocks the bookmark. Defaults stay **JackAL, pick 5** in JFL 28 until you sync a different room.
 
 ## How to draft this format
 

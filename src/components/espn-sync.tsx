@@ -545,8 +545,8 @@ export function EspnSync({
         bookmarklet={bookmarkHref}
         title={
           ingestUrl
-            ? `Drag onto the bookmarks bar, then click it on ESPN. Posts to ${ingestUrl}`
-            : "Drag this onto the bookmarks bar, then click it on the ESPN draft tab."
+            ? `Opens this help only. Drag onto the bookmarks bar, then click that bookmark on the ESPN draft tab. Posts to ${ingestUrl}`
+            : "Opens this help only. Drag this onto the bookmarks bar, then click that bookmark on the ESPN draft tab."
         }
         onClick={(e) => {
           e.preventDefault();
@@ -582,9 +582,11 @@ export function EspnSync({
           <SheetHeader>
             <SheetTitle>Sync any ESPN draft</SheetTitle>
             <SheetDescription>
-              Clicking Sync ESPN in Draft Room only opens this help. Sync runs when you click the
+              The Sync ESPN chip in Draft Room only opens this help — it does not read ESPN. Sync
+              starts when you click the <span className="font-medium text-foreground">Sync ESPN</span>{" "}
               bookmark on the ESPN draft tab. No green badge on ESPN means that bookmark did not
-              run — delete it, drag this chip to the bookmarks bar, then click it on ESPN.
+              run — delete the old one, copy the script below, save it as the bookmark URL, then
+              click it on ESPN.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-10">
@@ -714,9 +716,17 @@ export function EspnSync({
                   <p className="mt-2 text-xs text-muted-foreground">Waiting for the first sync…</p>
                 )}
               </li>
-              <li className="rounded-xl border border-border bg-card p-3">
+              <li
+                className={cn(
+                  "rounded-xl border bg-card p-3",
+                  status.live && status.pickCount === 0
+                    ? "border-primary/50 bg-primary/5"
+                    : "border-border",
+                )}
+              >
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  3 · Paste pick history (if the board stays empty)
+                  3 · Paste pick history
+                  {status.live && status.pickCount === 0 ? " · needed now" : " (if the board stays empty)"}
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                   Practice drafts often leave ESPN&apos;s API slots empty even when names are on

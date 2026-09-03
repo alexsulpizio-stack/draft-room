@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { EspnIngestMeta, EspnRawPick } from "./espn";
-import { setIngest, getIngest } from "./espn-ingest";
+import { mergeEspnPicks, type EspnIngestMeta, type EspnRawPick } from "./espn";
+import { setIngest, getIngest, type IngestPayload } from "./espn-ingest";
 
 const TOPIC_PATHS = [
   `${process.cwd()}/.data/espn-relay-topic`,
@@ -44,7 +44,14 @@ export type RelayPacked = {
   t?: number;
 };
 
-export function unpackRelayMessage(raw: string): { picks: EspnRawPick[]; meta?: EspnIngestMeta; href?: string; ts: number } | null {
+export type UnpackedRelay = {
+  picks: EspnRawPick[];
+  meta?: EspnIngestMeta;
+  href?: string;
+  ts: number;
+};
+
+export function unpackRelayMessage(raw: string): UnpackedRelay | null {
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
     if (v && v.v === 1 && Array.isArray(v.p)) {
@@ -79,6 +86,51 @@ export function unpackRelayMessage(raw: string): { picks: EspnRawPick[]; meta?: 
 
 type NtfyLine = { event?: string; message?: string; time?: number };
 
+/** Merge a polled ntfy snapshot into ingest. Never apply older messages after a clear. Never shrink picks. */
+export function applyRelayToIngest(
+  current: IngestPayload | null,
+  best: UnpackedRelay | null,
+  heartbeat: UnpackedRelay | null,
+): IngestPayload | null {
+  let next = current;
+  const currentTs = current?.ts ?? 0;
+  if (best) {
+    const stale = currentTs > 0 && best.ts < currentTs;
+    if (!stale) {
+      const merged = mergeEspnPicks(current?.picks ?? [], best.picks);
+      const grew = merged.length > (current?.picks.length ?? 0);
+      const sameOrNewer = best.ts >= currentTs && merged.length >= (current?.picks.length ?? 0);
+      if (grew || sameOrNewer) {
+        next = {
+          picks: merged,
+          href: best.href || current?.href,
+          title: current?.title,
+          ts: Math.max(best.ts, currentTs),
+          meta: { ...current?.meta, ...best.meta },
+        };
+      }
+    }
+  }
+  if (!heartbeat) return next ?? null;
+  if (next?.picks.length) {
+    if (heartbeat.ts <= (next.ts ?? 0)) return next;
+    return {
+      picks: next.picks,
+      href: next.href || heartbeat.href,
+      title: next.title,
+      ts: heartbeat.ts,
+      meta: { ...heartbeat.meta, ...next.meta },
+    };
+  }
+  if (next && next.ts >= heartbeat.ts) return next;
+  return {
+    picks: [],
+    href: heartbeat.href,
+    ts: heartbeat.ts,
+    meta: heartbeat.meta,
+  };
+}
+
 export async function pullRelayIntoIngest(): Promise<boolean> {
   const topic = getRelayTopic();
   const url = `${NTFY_HOST}/${topic}/json?poll=1&since=2h`;
@@ -87,9 +139,8 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
     if (!res.ok) return false;
     const text = await res.text();
     if (!text.trim()) return false;
-    let best: { picks: EspnRawPick[]; meta?: EspnIngestMeta; href?: string; ts: number } | null = null;
-    let heartbeat: { picks: EspnRawPick[]; meta?: EspnIngestMeta; href?: string; ts: number } | null =
-      null;
+    let best: UnpackedRelay | null = null;
+    let heartbeat: UnpackedRelay | null = null;
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       let msg: NtfyLine;
@@ -110,39 +161,15 @@ export async function pullRelayIntoIngest(): Promise<boolean> {
       }
     }
     const current = getIngest();
-    if (best) {
-      if (current && current.picks.length >= best.picks.length && current.ts >= best.ts) {
-        /* keep looking at heartbeat for a fresher connected stamp */
-      } else {
-        setIngest({
-          picks: best.picks,
-          href: best.href,
-          ts: best.ts,
-          meta: best.meta,
-        });
-        return true;
-      }
-    }
-    if (!heartbeat) return false;
-    // Empty heartbeats keep "connected" fresh without wiping real picks.
-    if (current?.picks.length) {
-      if (heartbeat.ts <= current.ts) return false;
-      setIngest({
-        picks: current.picks,
-        href: current.href || heartbeat.href,
-        title: current.title,
-        ts: heartbeat.ts,
-        meta: { ...current.meta, ...heartbeat.meta },
-      });
-      return true;
-    }
-    if (current && current.ts >= heartbeat.ts) return false;
-    setIngest({
-      picks: [],
-      href: heartbeat.href,
-      ts: heartbeat.ts,
-      meta: heartbeat.meta,
-    });
+    const next = applyRelayToIngest(current, best, heartbeat);
+    if (!next) return false;
+    const same =
+      current &&
+      current.ts === next.ts &&
+      current.picks.length === next.picks.length &&
+      current.href === next.href;
+    if (same) return false;
+    setIngest(next);
     return true;
   } catch {
     return false;
