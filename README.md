@@ -35,16 +35,19 @@ Open [http://localhost:43173](http://localhost:43173) in Chrome on a computer. K
 `next dev` can exit when a Cloud Agent shell dies or the process is killed. Use the restart loop so port **43173** comes back automatically:
 
 ```bash
-# Preferred: tmux session that survives agent shells
+# Preferred: ensure tmux session draft-room-dev is running the loop
+bash scripts/ensure-dev-server.sh
+
+# Or attach / create the session yourself
 SESSION=draft-room-dev
 tmux -f /exec-daemon/tmux.portal.conf has-session -t "=$SESSION" 2>/dev/null \
   || tmux -f /exec-daemon/tmux.portal.conf new-session -d -s "$SESSION" -c /workspace -- bash scripts/keep-dev-server.sh
 
-# Or run the loop directly
+# Or run the loop directly (no tmux)
 bash scripts/keep-dev-server.sh
 ```
 
-`scripts/keep-dev-server.sh` runs `npx next dev --port 43173 --hostname 0.0.0.0` in a loop with a short backoff after any exit. Cloud Agent boots also start it via `.cursor/environment.json` (`start`).
+`scripts/keep-dev-server.sh` runs `npx next dev --port 43173 --hostname 0.0.0.0` in a loop with a short backoff after any exit. Cloud Agent boots call `scripts/ensure-dev-server.sh` via `.cursor/environment.json` `start`, which creates the `draft-room-dev` tmux session (or runs the loop if tmux is unavailable).
 
 Check health: `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:43173` → `200`.
 
