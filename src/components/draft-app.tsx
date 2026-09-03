@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -53,10 +53,17 @@ import {
   userPickOveralls,
   type BoardSort,
 } from "@/lib/draft";
-import { applyUpdates, parseRankingPaste } from "@/lib/parse-import";
+import {
+  applyLeagueRankUpdates,
+  parseRankingPaste,
+  updatesToPatches,
+  type RankImportSource,
+} from "@/lib/parse-import";
 import {
   applyInjuryOverlay,
   applyRankPatches,
+  LIVE_RANK_POLL_MS,
+  MIN_REFRESH_INTERVAL_MS,
   scoringLabel,
   type RankPatch,
 } from "@/lib/rank-refresh";
@@ -67,6 +74,18 @@ import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
 import { matchByName, mergeBoardWithEspnExtras } from "@/lib/espn";
 
 const STORAGE_KEY = "draft-room-jfl-28-jackal";
+
+type LeagueSourceImport = {
+  patches: Record<string, RankPatch>;
+  matched: number;
+  importedAt: number;
+  label?: string;
+};
+
+type LeagueRanks = {
+  fp?: LeagueSourceImport;
+  ds?: LeagueSourceImport;
+};
 
 function SortTh({
   label,
@@ -120,7 +139,15 @@ type RankOverlay = {
   injuryMatched?: number;
   injuriesLive?: boolean;
   injuriesComplete?: boolean;
+  /** Last successful or failed refresh attempt (for UI). */
+  lastAttemptAt?: number;
+  lastError?: string;
+  lastSource?: "manual" | "pick" | "poll";
+  cached?: boolean;
+  ranksOnly?: boolean;
 };
+
+type RefreshReason = "manual" | "pick" | "poll";
 
 type Persisted = {
   settings: LeagueSettings;
@@ -130,6 +157,8 @@ type Persisted = {
   extras?: Player[];
   importText?: string;
   rankOverlay?: RankOverlay;
+  /** League-adjusted FP/DS overlays (CSV/paste). Win over generic ECR refresh. */
+  leagueRanks?: LeagueRanks;
 };
 
 const EMPTY: Persisted = {
@@ -138,6 +167,7 @@ const EMPTY: Persisted = {
   stars: [],
   avoids: [],
   extras: [],
+  leagueRanks: {},
 };
 
 function readRaw() {
@@ -194,6 +224,7 @@ export function DraftApp() {
           draftType: parsed.settings?.draftType ?? "snake",
         },
         extras: parsed.extras ?? [],
+        leagueRanks: parsed.leagueRanks ?? {},
       };
     } catch {
       return EMPTY;
@@ -204,6 +235,7 @@ export function DraftApp() {
   const stars = data.stars ?? EMPTY.stars;
   const extras = useMemo(() => data.extras ?? [], [data.extras]);
   const rankOverlay = data.rankOverlay;
+  const leagueRanks = data.leagueRanks ?? {};
 
   const setSettings = useCallback(
     (next: LeagueSettings) => writeStore({ ...data, settings: next }),
@@ -242,22 +274,46 @@ export function DraftApp() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [importSource, setImportSource] = useState<RankImportSource>("fp");
   const [importMsg, setImportMsg] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<Player[] | null>(null);
   const [espn, setEspn] = useState<EspnLiveStatus>({ live: false, source: "empty", pickCount: 0 });
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRanks, setAutoRanks] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
+  const refreshingRef = useRef(false);
+  const lastAutoPickCount = useRef(-1);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const leagueRanksRef = useRef(leagueRanks);
+  leagueRanksRef.current = leagueRanks;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   const board = useMemo(() => {
+    const refreshed = applyRankPatches(PLAYERS, rankOverlay?.patches);
+    const withLeague = applyLeagueRankUpdates(
+      applyLeagueRankUpdates(refreshed, leagueRanks.fp?.patches),
+      leagueRanks.ds?.patches,
+    );
     const ranked = applyInjuryOverlay(
-      applyRankPatches(PLAYERS, rankOverlay?.patches),
+      withLeague,
       rankOverlay?.injuries,
       rankOverlay?.injuriesLive,
       rankOverlay?.injuriesComplete,
     );
-    const base = overrides ?? ranked;
-    return mergeBoardWithEspnExtras(base, extras);
-  }, [overrides, extras, rankOverlay]);
+    return mergeBoardWithEspnExtras(ranked, extras);
+  }, [extras, rankOverlay, leagueRanks]);
+
+  const leagueStatus = useMemo(() => {
+    const parts: string[] = [];
+    if (leagueRanks.fp?.matched) {
+      parts.push(`FP league ${leagueRanks.fp.matched}`);
+    }
+    if (leagueRanks.ds?.matched) {
+      parts.push(`DS league ${leagueRanks.ds.matched}`);
+    }
+    return parts;
+  }, [leagueRanks]);
   const byId = useMemo(() => new Map(board.map((p) => [p.id, p])), [board]);
   const overall = picks.length + 1;
   const totalPicks = settings.teams * settings.rounds;
@@ -377,25 +433,44 @@ export function DraftApp() {
     });
   };
 
-  const applyImport = () => {
-    const parsed = parseRankingPaste(importText);
-    setOverrides(
-      applyUpdates(
-        applyInjuryOverlay(
-          applyRankPatches(PLAYERS, rankOverlay?.patches),
-          rankOverlay?.injuries,
-          rankOverlay?.injuriesLive,
-          rankOverlay?.injuriesComplete,
-        ),
-        parsed.updates,
-      ),
-    );
+  const applyImport = (source: RankImportSource = importSource) => {
+    const parsed = parseRankingPaste(importText, source);
+    if (parsed.matched === 0) {
+      setImportMsg(
+        parsed.unmatched.length
+          ? `No players matched. Check the paste format. Unmatched: ${parsed.unmatched.slice(0, 6).join(", ")}`
+          : "Nothing to import — paste a CSV or Rank,Player list first.",
+      );
+      return;
+    }
+    const entry: LeagueSourceImport = {
+      patches: updatesToPatches(parsed.updates),
+      matched: parsed.matched,
+      importedAt: Date.now(),
+      label: source === "ds" ? "League-adjusted DraftSharks" : "League-adjusted FantasyPros",
+    };
+    const nextLeague: LeagueRanks = {
+      ...leagueRanks,
+      [source]: entry,
+    };
+    writeStore({ ...data, leagueRanks: nextLeague, importText });
     setImportMsg(
-      `Updated ${parsed.matched} players from your paste${
+      `Loaded ${parsed.matched} ${source === "ds" ? "DraftSharks" : "FantasyPros"} league ranks${
         parsed.unmatched.length ? `. Unmatched: ${parsed.unmatched.slice(0, 6).join(", ")}` : "."
-      }`
+      } Blend / # / suggestions now use ${source === "ds" ? "these DS ranks" : "these FP ranks"} instead of generic ECR.`,
     );
     setImportOpen(false);
+  };
+
+  const clearLeagueSource = (source: RankImportSource) => {
+    const next = { ...leagueRanks };
+    delete next[source];
+    writeStore({ ...data, leagueRanks: next });
+    setImportMsg(
+      source === "ds"
+        ? "Cleared league DraftSharks ranks — board falls back to refreshed / snapshot DS."
+        : "Cleared league FantasyPros ranks — board falls back to refreshed / snapshot FP.",
+    );
   };
 
   const refreshRankings = async () => {
@@ -428,7 +503,9 @@ export function DraftApp() {
           : data.rankOverlay?.patches;
       const injuriesLive = Boolean(json.injuriesLive && json.injuries);
       const injuriesComplete = Boolean(injuriesLive && json.injuriesComplete);
-      setOverrides(null);
+      const kept: string[] = [];
+      if (leagueRanks.fp?.matched) kept.push("FP league import");
+      if (leagueRanks.ds?.matched) kept.push("DS league import");
       writeStore({
         ...data,
         rankOverlay: {
@@ -448,20 +525,23 @@ export function DraftApp() {
             : data.rankOverlay?.injuriesComplete,
         },
       });
-      const when = json.fpUpdated ? ` · FP ${json.fpUpdated}` : "";
-      const inj = injuriesLive
-        ? ` · ${json.injuryMatched} injury flags`
-        : data.rankOverlay?.injuriesLive
-          ? ` · kept ${data.rankOverlay.injuryMatched ?? 0} injury flags`
-          : json.warnings?.find((w) => /injur/i.test(w))
-            ? ` · ${json.warnings.find((w) => /injur/i.test(w))}`
-            : " · snapshot injuries kept";
-      const warn = json.warnings?.find((w) => !/injur/i.test(w));
+      const baseMsg = [
+        json.fpMatched ? `FP ${json.fpMatched}` : null,
+        json.dsMatched ? `DS ${json.dsMatched}` : null,
+        injuriesLive ? `injuries ${json.injuryMatched ?? 0}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const keepNote = kept.length
+        ? ` League-specific ${kept.join(" + ")} still override generic ECR.`
+        : " Tip: Import your synced FP/DS cheat sheets for league-adjusted ranks.";
       setImportMsg(
-        `Refreshed ${scoringLabel(settings.scoring)} ranks · FP ${json.fpMatched ?? 0} · DS ${json.dsMatched ?? 0}${inj}${when}${warn ? ` · ${warn}` : ""}`,
+        `Refreshed public ${scoringLabel((json.scoring as LeagueSettings["scoring"]) ?? settings.scoring)} ranks${
+          baseMsg ? ` (${baseMsg})` : ""
+        }.${keepNote}${json.warnings?.length ? ` · ${json.warnings[0]}` : ""}`,
       );
-    } catch {
-      setImportMsg("Network error refreshing ranks. The snapshot board is unchanged.");
+    } catch (e) {
+      setImportMsg(e instanceof Error ? e.message : "Rank refresh failed.");
     } finally {
       setRefreshing(false);
     }
@@ -546,7 +626,7 @@ export function DraftApp() {
               size="sm"
               onClick={() => void refreshRankings()}
               disabled={refreshing}
-              title="Pull live FantasyPros ECR, DraftSharks 3D ranks, and current Out / Q / Watch injury flags"
+              title="Pull public FantasyPros ECR + DraftSharks 3D for your scoring setting, plus injury flags. Does not replace league-specific imports."
             >
               {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               {refreshing ? "Refreshing…" : "Refresh ranks"}
@@ -556,13 +636,24 @@ export function DraftApp() {
               onOpenChange={setImportOpen}
               text={importText}
               setText={setImportText}
+              source={importSource}
+              setSource={setImportSource}
+              leagueRanks={leagueRanks}
               onApply={applyImport}
+              onClear={clearLeagueSource}
             />
             <SettingsSheet settings={settings} setSettings={setSettings} />
           </div>
         </div>
         {importMsg ? (
           <p className="border-t border-border px-4 py-1.5 text-center text-xs text-primary">{importMsg}</p>
+        ) : leagueStatus.length > 0 ? (
+          <p className="border-t border-border px-4 py-1.5 text-center text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">League ranks</span>
+            {" · "}
+            {leagueStatus.join(" · ")}
+            {" · blend / # / suggestions use these instead of generic ECR"}
+          </p>
         ) : espn.live ? (
           <p className="border-t border-primary/20 bg-primary/8 px-4 py-1.5 text-center text-xs">
             <span className="font-medium text-primary">ESPN live</span>
@@ -637,6 +728,14 @@ export function DraftApp() {
                       : ""
                   }`
                 : " · Sept 1 snapshot"}
+              {leagueRanks.fp?.matched || leagueRanks.ds?.matched
+                ? ` · league ${[
+                    leagueRanks.fp?.matched ? "FP" : null,
+                    leagueRanks.ds?.matched ? "DS" : null,
+                  ]
+                    .filter(Boolean)
+                    .join("+")}`
+                : ""}
             </span>
             <label className="flex items-center gap-2">
               <Switch checked={showTaken} onCheckedChange={setShowTaken} />
@@ -1202,7 +1301,8 @@ function SettingsSheet({
               className="w-full accent-[var(--primary)]"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              0% = FantasyPros ECR only. 100% = DraftSharks 3D only. 50% is the blended board.
+              0% = FantasyPros only. 100% = DraftSharks only. 50% is the blended board.
+              League imports replace generic ECR for that source when present.
             </p>
           </div>
           <Field label="Rounds">
@@ -1254,14 +1354,35 @@ function ImportDialog({
   onOpenChange,
   text,
   setText,
+  source,
+  setSource,
+  leagueRanks,
   onApply,
+  onClear,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   text: string;
   setText: (v: string) => void;
-  onApply: () => void;
+  source: RankImportSource;
+  setSource: (s: RankImportSource) => void;
+  leagueRanks: LeagueRanks;
+  onApply: (source: RankImportSource) => void;
+  onClear: (source: RankImportSource) => void;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const active = leagueRanks[source];
+  const placeholder =
+    source === "ds"
+      ? "RK,PLAYER,POS\n1,Jahmyr Gibbs,RB\n2,Bijan Robinson,RB"
+      : "RK,PLAYER NAME,TEAM,POS,ADP\n1,Ja'Marr Chase,CIN,WR,3";
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    const raw = await file.text();
+    setText(raw);
+  };
+
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => onOpenChange(true)}>
@@ -1273,24 +1394,110 @@ function ImportDialog({
           if (typeof next === "boolean") onOpenChange(next);
         }}
       >
-      <DialogContent className="max-w-lg sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Paste FantasyPros rankings</DialogTitle>
-          <DialogDescription>
-            Export or copy your latest cheat sheet. We&apos;ll overlay those ranks onto this board and keep DraftSharks 3D next to them.
-          </DialogDescription>
-        </DialogHeader>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={"RK,PLAYER NAME,TEAM,POS,ADP\n1,Ja'Marr Chase,CIN,WR,3"}
-          className="min-h-40 w-full rounded-xl border border-input bg-background p-3 font-mono text-xs"
-        />
-        <Button onClick={onApply} disabled={!text.trim()}>
-          Overlay my rankings
-        </Button>
-      </DialogContent>
-    </Dialog>
+        <DialogContent className="max-w-lg sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>League-specific rankings</DialogTitle>
+            <DialogDescription>
+              Sync your league on FantasyPros or DraftSharks first, then export or copy that board
+              here. Draft Room cannot log into those sites — public Refresh stays generic ECR / 3D.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Tabs
+            value={source}
+            onValueChange={(v) => setSource(v === "ds" ? "ds" : "fp")}
+            className="gap-3"
+          >
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="fp">FantasyPros</TabsTrigger>
+              <TabsTrigger value="ds">DraftSharks</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="fp" className="space-y-2 text-xs text-muted-foreground">
+              <ol className="list-decimal space-y-1 pl-4">
+                <li>On FantasyPros, sync JFL 28 (or your league) under My Leagues.</li>
+                <li>
+                  Open{" "}
+                  <a
+                    className="text-primary underline-offset-2 hover:underline"
+                    href="https://www.fantasypros.com/nfl/cheat-sheet-creator.php"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Cheat Sheet Creator
+                  </a>
+                  , pick that synced league, start from ECR.
+                </li>
+                <li>Download / export CSV (or copy the Rank, Player, Team, Pos table).</li>
+                <li>Paste below or choose the file — this replaces the FP column only.</li>
+              </ol>
+            </TabsContent>
+
+            <TabsContent value="ds" className="space-y-2 text-xs text-muted-foreground">
+              <ol className="list-decimal space-y-1 pl-4">
+                <li>On DraftSharks, sync the same league so 3D values match your scoring / roster.</li>
+                <li>
+                  Open your league-adjusted rankings (Draft War Room or rankings with that league
+                  selected).
+                </li>
+                <li>
+                  Copy Rank + Player (+ Pos if available). DS has no public CSV for synced leagues —
+                  a Rank,Player paste is enough.
+                </li>
+                <li>Paste below — this replaces the DS column only.</li>
+              </ol>
+            </TabsContent>
+          </Tabs>
+
+          {active ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs">
+              <span>
+                <span className="font-medium text-foreground">{active.label ?? "Imported"}</span>
+                {" · "}
+                {active.matched} players ·{" "}
+                {new Date(active.importedAt).toLocaleString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </span>
+              <Button variant="ghost" size="sm" onClick={() => onClear(source)}>
+                Clear
+              </Button>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+              No {source === "ds" ? "DraftSharks" : "FantasyPros"} league import yet — board uses
+              snapshot / Refresh for that column.
+            </p>
+          )}
+
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,.tsv,.txt,text/csv,text/plain"
+              className="hidden"
+              onChange={(e) => void onFile(e.target.files?.[0])}
+            />
+            <Button variant="outline" size="sm" type="button" onClick={() => fileRef.current?.click()}>
+              Choose CSV…
+            </Button>
+            <span className="text-xs text-muted-foreground">or paste below</span>
+          </div>
+
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={placeholder}
+            className="min-h-40 w-full rounded-xl border border-input bg-background p-3 font-mono text-xs"
+          />
+          <Button onClick={() => onApply(source)} disabled={!text.trim()}>
+            {source === "ds" ? "Import DraftSharks ranks" : "Import FantasyPros ranks"}
+          </Button>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

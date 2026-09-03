@@ -56,4 +56,29 @@ Cookies still exist under **Show cookies** if a browser blocks the bookmark. Def
 - Never draft a D/ST. Kicker in the last round.
 - 1QB: wait unless elite value falls.
 
-Ranks start as a September 1, 2026 snapshot of public FantasyPros ECR and DraftSharks 3D values. Click **Refresh ranks** to pull live Half PPR (or whatever scoring is set in League) sheets **and recent injury flags** (Out / Q / Watch) from FantasyPros injury news, DraftSharks ranking badges when present, and the public ESPN injury report (no cookies). Overlay a CSV via **Import** if you want your own FP list.
+Ranks start as a September 1, 2026 snapshot of public FantasyPros ECR and DraftSharks 3D values. Click **Refresh ranks** to pull live public Half PPR (or whatever scoring is set in League) sheets **and recent injury flags** (Out / Q / Watch) from FantasyPros injury news, DraftSharks ranking badges when present, and the public ESPN injury report (no cookies). That refresh is **generic scoring ECR / 3D** — Draft Room cannot log into your FantasyPros or DraftSharks account, so it cannot see ranks that only exist after you sync a private league.
+
+## League-specific FP / DS ranks
+
+If you already synced JFL 28 (or another league) on FantasyPros and DraftSharks so those sites customize rankings to your scoring and roster, import those boards into Draft Room:
+
+### FantasyPros (CSV)
+
+1. Sync the league under FantasyPros → My Leagues.
+2. Open [Cheat Sheet Creator](https://www.fantasypros.com/nfl/cheat-sheet-creator.php), select that synced league, start from ECR (or your preferred expert set).
+3. Download / export the CSV (or copy Rank, Player, Team, Pos).
+4. In Draft Room click **Import** → **FantasyPros** → paste or **Choose CSV…** → **Import FantasyPros ranks**.
+
+That replaces the **FP** column only. Blend, `#`, sorts, and suggested picks use the imported FP ranks instead of generic ECR.
+
+### DraftSharks (paste)
+
+DraftSharks does not offer a public CSV for synced-league boards. After you sync the league:
+
+1. Open your league-adjusted rankings (Draft War Room or rankings with that league selected).
+2. Copy Rank + Player (+ Pos when available).
+3. In Draft Room click **Import** → **DraftSharks** → paste → **Import DraftSharks ranks**.
+
+That replaces the **DS** column only.
+
+Imports persist in the browser (localStorage). **Refresh ranks** still updates public sheets and injuries but **does not wipe** league imports — those keep winning for their column until you clear them in the Import dialog.
