@@ -327,6 +327,12 @@ assert(relaySrc.includes("isAllowedEspnIngestHref"), "relay filters with isAllow
 const listenSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/listen/route.ts"), "utf8");
 assert(listenSrc.includes("Drop foreign scrapes before relay merge") || listenSrc.indexOf("isAllowedEspnIngestHref") !== listenSrc.lastIndexOf("isAllowedEspnIngestHref"), "listen clears foreign before relay");
 
+const bmKeep = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/lib/espn-bookmarklet.ts"), "utf8");
+assert(bmKeep.includes("nowKeep-lastBeat") || bmKeep.includes("Soft heartbeat"), "bookmarklet soft-heartbeat when sig unchanged");
+
+const ingestSrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/app/api/espn/ingest/route.ts"), "utf8");
+assert(ingestSrc.includes("heartbeat: true"), "ingest empty-with-prior refreshes as heartbeat");
+
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);
 console.log("sentinel subtitle:", line);

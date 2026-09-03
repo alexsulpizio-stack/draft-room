@@ -171,6 +171,22 @@ export async function POST(req: Request) {
     );
   }
 
+  // Guard against a tiny partial scrape wiping a solid league overlay.
+  if (
+    previous?.matched &&
+    parsed.matched < Math.min(20, Math.floor(previous.matched * 0.35))
+  ) {
+    return cors(req, {
+      ok: true,
+      ignoredWeak: true,
+      source,
+      matched: previous.matched,
+      incoming: parsed.matched,
+      ts: previous.ts,
+      error: `Kept prior ${source.toUpperCase()} overlay (${previous.matched}) — incoming scrape only matched ${parsed.matched}.`,
+    });
+  }
+
   const label =
     source === "ds"
       ? "Live DraftSharks War Room sync"

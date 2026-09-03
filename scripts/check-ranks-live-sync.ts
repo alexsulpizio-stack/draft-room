@@ -61,4 +61,22 @@ assert.ok(store.fp?.patches && Object.keys(store.fp.patches).length >= 5);
 clearRanksIngest("fp");
 assert.equal(getRanksIngest().fp, undefined);
 
+// Weak scrape guard: keep a strong prior overlay.
+setRanksIngestSource({
+  source: "fp",
+  rows: [{ rank: 1, name: "Ja'Marr Chase", pos: "WR", team: "CIN" }],
+  text,
+  ts: 2000,
+  matched: 80,
+  patches: updatesToPatches(parsed.updates),
+  unmatched: [],
+  label: "prior",
+});
+assert.equal(getRanksIngest().fp?.matched, 80);
+assert.ok(
+  8 < Math.min(20, Math.floor(80 * 0.35)),
+  "8 matched is below the 35% weak-scrape threshold of 80",
+);
+
+clearRanksIngest();
 console.log("check-ranks-live-sync: ok");
