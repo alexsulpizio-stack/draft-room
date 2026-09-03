@@ -7,6 +7,7 @@ import {
   ChevronUp,
   ClipboardPaste,
   Loader2,
+  Radio,
   RefreshCw,
   RotateCcw,
   Settings2,
@@ -857,6 +858,26 @@ export function DraftApp() {
               status={espn}
               setStatus={setEspn}
             />
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-full bg-teal-700 px-3 text-xs font-semibold text-white hover:bg-teal-700/90"
+              title="Opens Import → FantasyPros. Copy Sync FP ranks, then click that bookmark on draftwizard.fantasypros.com — not on ESPN."
+              onClick={() => openLeagueImport("fp")}
+            >
+              <Radio className="size-3.5" />
+              {leagueRanks.fp?.live ? `Sync FP · ${leagueRanks.fp.matched}` : "Sync FP"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-full bg-teal-700 px-3 text-xs font-semibold text-white hover:bg-teal-700/90"
+              title="Opens Import → DraftSharks. Copy Sync DS ranks, then click that bookmark on draftsharks.com War Room — not on ESPN."
+              onClick={() => openLeagueImport("ds")}
+            >
+              <Radio className="size-3.5" />
+              {leagueRanks.ds?.live ? `Sync DS · ${leagueRanks.ds.matched}` : "Sync DS"}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -1752,7 +1773,7 @@ function ImportDialog({
             : "Import league-specific FantasyPros / DraftSharks ranks (paste or live bookmarklet)"
         }
       >
-        <ClipboardPaste /> {midDraft && hasAny ? "Re-import" : "Import"}
+        <ClipboardPaste /> {midDraft && hasAny ? "Re-import" : "Import FP/DS"}
       </Button>
       <Dialog
         open={open}
