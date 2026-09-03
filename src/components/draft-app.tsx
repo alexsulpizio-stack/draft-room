@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -62,8 +62,6 @@ import {
 import {
   applyInjuryOverlay,
   applyRankPatches,
-  LIVE_RANK_POLL_MS,
-  MIN_REFRESH_INTERVAL_MS,
   scoringLabel,
   type RankPatch,
 } from "@/lib/rank-refresh";
@@ -139,15 +137,7 @@ type RankOverlay = {
   injuryMatched?: number;
   injuriesLive?: boolean;
   injuriesComplete?: boolean;
-  /** Last successful or failed refresh attempt (for UI). */
-  lastAttemptAt?: number;
-  lastError?: string;
-  lastSource?: "manual" | "pick" | "poll";
-  cached?: boolean;
-  ranksOnly?: boolean;
 };
-
-type RefreshReason = "manual" | "pick" | "poll";
 
 type Persisted = {
   settings: LeagueSettings;
@@ -278,16 +268,7 @@ export function DraftApp() {
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [espn, setEspn] = useState<EspnLiveStatus>({ live: false, source: "empty", pickCount: 0 });
   const [refreshing, setRefreshing] = useState(false);
-  const [autoRanks, setAutoRanks] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
-  const refreshingRef = useRef(false);
-  const lastAutoPickCount = useRef(-1);
-  const dataRef = useRef(data);
-  dataRef.current = data;
-  const leagueRanksRef = useRef(leagueRanks);
-  leagueRanksRef.current = leagueRanks;
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
 
   const board = useMemo(() => {
     const refreshed = applyRankPatches(PLAYERS, rankOverlay?.patches);
