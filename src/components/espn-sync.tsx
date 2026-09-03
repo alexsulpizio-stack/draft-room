@@ -428,6 +428,7 @@ export function EspnSync({
         ingestUrl?: string;
         relayUrl?: string;
         connected?: boolean;
+        cleared?: boolean;
         loopbackHostMismatch?: boolean;
       };
       if (typeof json.publicOrigin === "string" && json.publicOrigin) {
@@ -440,6 +441,15 @@ export function EspnSync({
         setLoopbackHostMismatch(json.loopbackHostMismatch);
       }
       if (!json.ingest || !json.picks?.length) {
+        if (json.cleared) {
+          listenSig.current = "";
+          setIngestHint(null);
+          if (statusRef.current.source === "room-capture") {
+            onPicksRef.current([], [], settingsRef.current);
+          }
+          setStatus({ live: false, source: "empty", pickCount: 0 });
+          return;
+        }
         const meta = json.meta ?? {};
         const hadLivePicks = statusRef.current.pickCount > 0;
         if (json.connected || meta.leagueName || meta.leagueId) {

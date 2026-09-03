@@ -1291,6 +1291,12 @@ export function isAllowedEspnIngestHref(href: unknown): boolean {
   }
 }
 
+/** True only for a real ESPN room or a paste log — not a clear stamp or a href-less test write. */
+export function isLiveEspnCaptureHref(href: unknown): boolean {
+  if (href === "cleared") return false;
+  return isAllowedEspnIngestHref(href);
+}
+
 export function isLoopbackOrigin(origin: string): boolean {
   try {
     const host = new URL(origin).hostname.toLowerCase();

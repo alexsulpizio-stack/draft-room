@@ -3,6 +3,7 @@ import {
   clampEspnPickOrder,
   extrasFromMapped,
   isAllowedEspnIngestHref,
+  isLiveEspnCaptureHref,
   loadEspnPlayers,
   mapEspnPicks,
   mergeIngestMeta,
@@ -70,11 +71,32 @@ export async function GET(req: Request) {
   await pullRelayIntoIngest();
   let last = getIngest();
   const href = last?.href ?? "";
-  if (last && href && href !== "paste" && !isAllowedEspnIngestHref(href)) {
+  if (last && href && href !== "paste" && href !== "cleared" && !isAllowedEspnIngestHref(href)) {
     clearIngest("allow-replay");
     last = null;
   }
+  // Href-less test writes (e.g. check scripts) must not mark players taken.
+  if (last && last.picks.length && !isLiveEspnCaptureHref(last.href)) {
+    clearIngest("block-relay");
+    last = getIngest();
+  }
   const base = listenMeta(req);
+  if (last?.href === "cleared") {
+    return NextResponse.json({
+      ok: true,
+      ingest: false,
+      cleared: true,
+      connected: false,
+      stale: false,
+      source: "empty",
+      picks: [],
+      extras: [],
+      count: 0,
+      ts: last.ts,
+      href: last.href,
+      ...base,
+    });
+  }
   if (!last) {
     return NextResponse.json({
       ok: true,

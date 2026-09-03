@@ -17,7 +17,7 @@ import {
   snapshotIdForEspnPick,
   stubFromEspn,
 } from "../src/lib/espn";
-import { getIngest, INGEST_PATHS, setIngest } from "../src/lib/espn-ingest";
+import { clearIngest, getIngest, INGEST_PATHS, setIngest } from "../src/lib/espn-ingest";
 import { playerSublineText } from "../src/lib/player-display";
 import { PLAYERS } from "../src/lib/players";
 import type { Player } from "../src/lib/types";
@@ -390,11 +390,16 @@ assert(
 );
 assert(bm.includes("Sync FP ranks") || bm.includes("Sync DS ranks"), "bookmarklet points users at FP/DS bookmarks");
 
-const { isAllowedEspnIngestHref } = require("../src/lib/espn") as typeof import("../src/lib/espn");
+const { isAllowedEspnIngestHref, isLiveEspnCaptureHref } = require("../src/lib/espn") as typeof import("../src/lib/espn");
 assert(isAllowedEspnIngestHref("https://fantasy.espn.com/football/draft?leagueId=1"), "espn href allowed");
 assert(isAllowedEspnIngestHref("paste"), "paste href allowed");
+assert(isAllowedEspnIngestHref("cleared"), "cleared stamp is an allowed ingest href");
 assert(!isAllowedEspnIngestHref("https://draftwizard.fantasypros.com/d/rdr.jsp"), "FP href rejected");
 assert(!isAllowedEspnIngestHref("https://www.draftsharks.com/war-room"), "DS href rejected");
+assert(isLiveEspnCaptureHref("https://fantasy.espn.com/football/draft"), "live capture needs espn href");
+assert(isLiveEspnCaptureHref("paste"), "paste is a live capture");
+assert(!isLiveEspnCaptureHref("cleared"), "cleared is not a live capture");
+assert(!isLiveEspnCaptureHref(undefined), "href-less writes are not live captures");
 
 const relaySrc = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/lib/espn-relay.ts"), "utf8");
 assert(relaySrc.includes("isAllowedEspnIngestHref"), "relay filters with isAllowedEspnIngestHref");
@@ -411,6 +416,9 @@ assert(ingestSrc.includes("heartbeat: true"), "ingest empty-with-prior refreshes
 
 void configuredPublicOrigin;
 void originDiagnostics;
+
+clearIngest("block-relay");
+assert((getIngest()?.picks.length ?? 0) === 0, "sentinel check must not leave test picks on the live board");
 
 console.log("espn sentinel checks passed");
 console.log("sample board subtitle:", goodLine);
