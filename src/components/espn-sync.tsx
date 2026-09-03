@@ -96,7 +96,7 @@ function mappedToDraft(mapped: MappedEspnPick[]): DraftPick[] {
   }));
 }
 
-/** React 19 strips javascript: hrefs. Set the bookmarklet on the DOM so drag-to-bookmarks still works. */
+/** React 19 strips javascript: hrefs. Put the script on the drag payload, not only the href. */
 function BookmarkletAnchor({
   bookmarklet,
   className,
@@ -111,10 +111,13 @@ function BookmarkletAnchor({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLAnchorElement>(null);
-  useLayoutEffect(() => {
+  const pinHref = () => {
     const el = ref.current;
     if (!el || !bookmarklet.startsWith("javascript:")) return;
     el.setAttribute("href", bookmarklet);
+  };
+  useLayoutEffect(() => {
+    pinHref();
   }, [bookmarklet]);
   return (
     <a
@@ -122,6 +125,13 @@ function BookmarkletAnchor({
       href="#"
       draggable
       title={title}
+      onMouseDown={pinHref}
+      onDragStart={(e) => {
+        pinHref();
+        e.dataTransfer.setData("text/uri-list", bookmarklet);
+        e.dataTransfer.setData("text/plain", bookmarklet);
+        e.dataTransfer.setData("text/x-moz-url", `${bookmarklet}\nSync ESPN`);
+      }}
       onClick={onClick}
       className={className}
     >
@@ -607,8 +617,9 @@ export function EspnSync({
                   1 · Save this
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Drag the green chip onto the bookmarks bar. Press Ctrl+Shift+B if the bar is hidden.
-                  Re-drag after every Draft Room update.
+                  Chrome often saves a drag as <span className="font-mono">#</span>, which does
+                  nothing on ESPN (no green badge). Copy the script, then add a bookmark whose URL
+                  is the paste. Or drag after this page has fully loaded.
                 </p>
                 <BookmarkletAnchor
                   bookmarklet={bookmarkHref}
@@ -637,14 +648,23 @@ export function EspnSync({
                 ) : null}
                 <Button
                   type="button"
-                  variant="ghost"
                   size="sm"
-                  className="mt-2 h-7 px-2 text-[11px]"
+                  className="mt-3"
                   onClick={() => void copyText(bookmarkHref, "bookmark")}
                 >
                   {copied === "bookmark" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copied === "bookmark" ? "Copied bookmarklet" : "Copy bookmarklet"}
+                  {copied === "bookmark" ? "Copied — paste as the bookmark URL" : "Copy Sync ESPN script"}
                 </Button>
+                <textarea
+                  readOnly
+                  value={bookmarkHref}
+                  className="mt-2 h-16 w-full resize-none rounded-lg border border-border bg-muted/40 p-2 font-mono text-[10px] leading-relaxed"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  Chrome → Ctrl+Shift+B → right-click the bar → Add page → Name: Sync ESPN → URL:
+                  paste the script → Save. Then click that bookmark on the ESPN draft tab.
+                </p>
               </li>
               <li className="rounded-xl border border-border bg-card p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
