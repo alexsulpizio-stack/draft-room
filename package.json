@@ -6,7 +6,10 @@
     "dev": "next dev --port 43173 --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --port 43173 --hostname 0.0.0.0",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "npm run test:checks",
+    "test:checks": "npx --yes tsx@4.20.6 scripts/check-rank-matching.ts && npx --yes tsx@4.20.6 scripts/check-league-rank-import.ts && npx --yes tsx@4.20.6 scripts/check-live-rank-refresh.ts && npx --yes tsx@4.20.6 scripts/check-ranks-live-sync.ts && npx --yes tsx@4.20.6 scripts/check-recommend-adp-sentinel.ts",
+    "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
