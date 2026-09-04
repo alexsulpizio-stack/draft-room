@@ -1106,6 +1106,20 @@ export function mapEspnPicks(args: {
 }): MappedEspnPick[] {
   const { picks, pickOrder, teamsCount, players, draftType = "snake" } = args;
   const usedIds = new Set<string>();
+  const nameOnlyHigh = picks.filter(
+    (p) =>
+      !isValidEspnPlayerId(p.playerId) &&
+      p.overallPickNumber > teamsCount * ESPN_PICK_LOG_MAX_ROUND,
+  ).length;
+  const nameOnlyHasEarly = picks.some(
+    (p) =>
+      !isValidEspnPlayerId(p.playerId) &&
+      p.overallPickNumber > 0 &&
+      p.overallPickNumber <= teamsCount * 3,
+  );
+  // Player-list / projection scrapes: many 70.05-style overalls, no 1.01–3.12. Drop those names.
+  const dropOrphanNameScrapes = nameOnlyHigh >= 3 && !nameOnlyHasEarly;
+
   return picks
     .filter((p) => {
       const cleaned = p.playerName ? cleanPickLogName(p.playerName) : "";
@@ -1114,6 +1128,7 @@ export function mapEspnPicks(args: {
       if (!idOk && !nameOk) return false;
       // Text scrapes turn projected points (75.05) into huge overalls. JSON has real ids.
       if (!idOk && p.overallPickNumber > teamsCount * ESPN_PICK_LOG_MAX_ROUND) return false;
+      if (!idOk && dropOrphanNameScrapes) return false;
       return true;
     })
     .map((p) => {
@@ -1540,9 +1555,14 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
       slot: Number(m[2]),
     });
   }
+  let highRoundHits = 0;
   for (let i = 0; i < hits.length; i++) {
     const hit = hits[i];
-    if (hit.round < 1 || hit.round > ESPN_PICK_LOG_MAX_ROUND || hit.slot < 1 || hit.slot > Math.max(size, 16)) continue;
+    if (hit.round < 1 || hit.slot < 1 || hit.slot > Math.max(size, 16)) continue;
+    if (hit.round > ESPN_PICK_LOG_MAX_ROUND) {
+      highRoundHits += 1;
+      continue;
+    }
     const start = hit.index + hit.len;
     const end = i + 1 < hits.length ? hits[i + 1].index : Math.min(blob.length, start + 90);
     push((hit.round - 1) * size + hit.slot, blob.slice(start, end).replace(/[\n\t]+/g, " "));
@@ -1564,7 +1584,12 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
     push(overall, numbered[4] ?? "");
   }
 
-  return [...byOverall.values()].sort((a, b) => a.overallPickNumber - b.overallPickNumber);
+  const kept = [...byOverall.values()].sort((a, b) => a.overallPickNumber - b.overallPickNumber);
+  const hasEarly = kept.some((p) => p.overallPickNumber <= size * 3);
+  // ESPN's available-player table uses projected points as X.YY. If the blob has
+  // many of those and no 1.01–3.XX, do not mark leftover names taken.
+  if (highRoundHits >= 3 && !hasEarly) return [];
+  return kept;
 }
 
 /** Bookmarklet that runs on fantasy.espn.com. Source uses String.raw so regexes stay intact. */

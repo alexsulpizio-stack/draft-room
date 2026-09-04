@@ -422,29 +422,26 @@ const scrapedBoard = parseEspnPickLog(
   ].join("\n"),
   12,
 );
-assert(
-  scrapedBoard.every((p) => p.playerName && !looksLikeEspnStatDump(p.playerName) && /[A-Za-z]{2,}/.test(p.playerName)),
-  "pick log scrape keeps only real names",
-);
+assert(scrapedBoard.length === 0, "projection table with no 1.01–3.XX is not a pick log");
 assert(
   !scrapedBoard.some((p) => /0 0 0/.test(p.playerName || "")),
   "stat-dump rows are not ingested as picks",
 );
-assert(
-  scrapedBoard.some((p) => p.playerName === "Rico Dowdle" && p.overallPickNumber === 41),
-  "4.05 Rico Dowdle is a real pick",
+const realLog = parseEspnPickLog(
+  "1.01 Ja'Marr Chase WR CIN\n1.02 Bijan Robinson RB ATL\n4.05 88 Rico Dowdle · Molesters\n13.04 83 Jonathon Brooks Q · Finest Meats",
+  12,
 );
 assert(
-  scrapedBoard.some((p) => p.playerName === "Jonathon Brooks" && p.overallPickNumber === 148),
-  "13.04 Jonathon Brooks is a real pick",
+  realLog.some((p) => p.playerName === "Rico Dowdle" && p.overallPickNumber === 41),
+  "4.05 Rico Dowdle is a real pick when the log starts at 1.01",
 );
 assert(
-  !scrapedBoard.some((p) => (p.playerName || "").includes("Chuba")),
+  realLog.some((p) => p.playerName === "Jonathon Brooks" && p.overallPickNumber === 148),
+  "13.04 Jonathon Brooks is a real pick when the log starts at 1.01",
+);
+assert(
+  !realLog.some((p) => (p.playerName || "").includes("Chuba")),
   "91.03 projected points + rank is not a pick",
-);
-assert(
-  !scrapedBoard.some((p) => (p.playerName || "").includes("Pierce") || (p.playerName || "").includes("Tucker")),
-  "18.07 / 95.01 projection rows are not picks",
 );
 
 const mappedDump = mapEspnPicks({
@@ -459,6 +456,20 @@ const mappedDump = mapEspnPicks({
 });
 assert(mappedDump.length === 1 && mappedDump[0].name === "Rico Dowdle", "listen mapping drops stat dumps and projection overalls");
 assert(mappedDump[0].playerId && !/^espn-0-0/.test(mappedDump[0].playerId), "real pick maps to a snapshot id");
+
+const mappedPlayerList = mapEspnPicks({
+  picks: [
+    { overallPickNumber: 893, playerId: 0, teamId: 0, playerName: "George Kittle" },
+    { overallPickNumber: 870, playerId: 0, teamId: 0, playerName: "Jaylen Warren" },
+    { overallPickNumber: 858, playerId: 0, teamId: 0, playerName: "Jonathon Brooks" },
+    { overallPickNumber: 41, playerId: 0, teamId: 8, playerName: "Rico Dowdle" },
+    { overallPickNumber: 151, playerId: 0, teamId: 7, playerName: "Brandon Aubrey" },
+  ],
+  pickOrder: [],
+  teamsCount: 12,
+  players: new Map(),
+});
+assert(mappedPlayerList.length === 0, "listen drops player-list scrapes with no early-round picks");
 
 const bm = buildBookmarklet("http://127.0.0.1:43173", "https://ntfy.sh/drjfl28jackal");
 assert(bm.startsWith("javascript:"), "bookmarklet protocol");
