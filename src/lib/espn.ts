@@ -1111,14 +1111,23 @@ export function mapEspnPicks(args: {
       !isValidEspnPlayerId(p.playerId) &&
       p.overallPickNumber > teamsCount * ESPN_PICK_LOG_MAX_ROUND,
   ).length;
-  const nameOnlyHasEarly = picks.some(
+  const nameOnlyEarly = picks.filter(
     (p) =>
       !isValidEspnPlayerId(p.playerId) &&
       p.overallPickNumber > 0 &&
       p.overallPickNumber <= teamsCount * 3,
-  );
-  // Player-list / projection scrapes: many 70.05-style overalls, no 1.01–3.12. Drop those names.
-  const dropOrphanNameScrapes = nameOnlyHigh >= 3 && !nameOnlyHasEarly;
+  ).length;
+  const nameOnlyInRange = picks.filter(
+    (p) =>
+      !isValidEspnPlayerId(p.playerId) &&
+      p.overallPickNumber > 0 &&
+      p.overallPickNumber <= teamsCount * ESPN_PICK_LOG_MAX_ROUND,
+  ).length;
+  // Player-list / projection scrapes: many 70.05-style overalls. A lone 3.08
+  // leftover must not turn a ranking table into taken picks. JSON ids stay.
+  const dropOrphanNameScrapes =
+    (nameOnlyHigh >= 3 && nameOnlyEarly === 0) ||
+    (nameOnlyHigh >= 8 && nameOnlyEarly <= 2 && nameOnlyHigh > nameOnlyInRange);
 
   return picks
     .filter((p) => {
@@ -1585,10 +1594,10 @@ export function parseEspnPickLog(text: string, teams = 12): EspnRawPick[] {
   }
 
   const kept = [...byOverall.values()].sort((a, b) => a.overallPickNumber - b.overallPickNumber);
-  const hasEarly = kept.some((p) => p.overallPickNumber <= size * 3);
-  // ESPN's available-player table uses projected points as X.YY. If the blob has
-  // many of those and no 1.01–3.XX, do not mark leftover names taken.
-  if (highRoundHits >= 3 && !hasEarly) return [];
+  const earlyCount = kept.filter((p) => p.overallPickNumber <= size * 3).length;
+  // ESPN's available-player table uses projected points as X.YY.
+  if (highRoundHits >= 3 && earlyCount === 0) return [];
+  if (highRoundHits >= 8 && earlyCount <= 2 && highRoundHits > kept.length) return [];
   return kept;
 }
 

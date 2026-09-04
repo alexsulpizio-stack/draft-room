@@ -471,6 +471,26 @@ const mappedPlayerList = mapEspnPicks({
 });
 assert(mappedPlayerList.length === 0, "listen drops player-list scrapes with no early-round picks");
 
+const mappedHarveyList = mapEspnPicks({
+  picks: [
+    { overallPickNumber: 32, playerId: 0, teamId: 0, playerName: "109 RJ Harvey" },
+    { overallPickNumber: 81, playerId: 0, teamId: 0, playerName: "96 Aaron Jones Sr." },
+    { overallPickNumber: 151, playerId: 0, teamId: 0, playerName: "98 Brandon Aubrey" },
+    { overallPickNumber: 211, playerId: 0, teamId: 0, playerName: "93 Chuba Hubbard" },
+    { overallPickNumber: 272, playerId: 0, teamId: 0, playerName: "103 Travis Kelce" },
+    { overallPickNumber: 870, playerId: 0, teamId: 0, playerName: "Jaylen Warren" },
+    { overallPickNumber: 834, playerId: 0, teamId: 0, playerName: "George Kittle" },
+    { overallPickNumber: 858, playerId: 0, teamId: 0, playerName: "Jonathon Brooks" },
+    { overallPickNumber: 1005, playerId: 0, teamId: 0, playerName: "Rachaad White" },
+    { overallPickNumber: 1123, playerId: 0, teamId: 0, playerName: "Dallas Goedert" },
+    { overallPickNumber: 800, playerId: 0, teamId: 0, playerName: "Chris Boswell" },
+  ],
+  pickOrder: [],
+  teamsCount: 12,
+  players: new Map(),
+});
+assert(mappedHarveyList.length === 0, "listen drops ranking-table scrapes with one accidental 3.08");
+
 const bm = buildBookmarklet("http://127.0.0.1:43173", "https://ntfy.sh/drjfl28jackal");
 assert(bm.startsWith("javascript:"), "bookmarklet protocol");
 assert(bm.includes("/\\s+/g"), "bookmarklet keeps \\\\s whitespace regex");
