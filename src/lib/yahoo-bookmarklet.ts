@@ -36,6 +36,10 @@ function read(){
  }
  return rows.sort(function(a,b){return a.overall-b.overall;});
 }
+badge("opening Board");
+var board=[...document.querySelectorAll("button,[role=tab],a")].find(function(n){return clean(n.innerText||n.textContent||"").toLowerCase()==="board";});
+if(board) board.click();
+await new Promise(function(resolve){setTimeout(resolve,700);});
 badge("scanning");
 var picks=read();
 if(!picks.length){badge("0 picks — Yahoo layout not recognized",1);return;}
