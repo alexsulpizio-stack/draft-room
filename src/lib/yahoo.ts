@@ -64,7 +64,7 @@ export function yahooToDraftPicks(
   const picks: DraftPick[] = [];
   let unmatched = 0;
   for (const row of raw) {
-    const playerId = matchOurPlayer(row.playerName, (row.pos as Position | undefined) ?? "WR", row.nflTeam);
+    const playerId = matchOurPlayer(row.playerName, (row.pos as Position | undefined) ?? "WR", row.nflTeam ?? "");
     if (!playerId) {
       unmatched += 1;
       continue;
