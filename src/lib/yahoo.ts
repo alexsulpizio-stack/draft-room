@@ -1,5 +1,5 @@
 import { matchOurPlayer } from "./espn";
-import type { DraftPick, DraftType } from "./types";
+import type { DraftPick, DraftType, Position } from "./types";
 
 export type YahooRawPick = {
   overall: number;
@@ -64,7 +64,7 @@ export function yahooToDraftPicks(
   const picks: DraftPick[] = [];
   let unmatched = 0;
   for (const row of raw) {
-    const playerId = matchOurPlayer(row.playerName, row.pos, row.nflTeam);
+    const playerId = matchOurPlayer(row.playerName, (row.pos as Position | undefined) ?? "WR", row.nflTeam);
     if (!playerId) {
       unmatched += 1;
       continue;
