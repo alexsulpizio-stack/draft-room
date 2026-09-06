@@ -1,0 +1,109 @@
+import { NextResponse } from "next/server";
+import { ingestCorsHeaders, requestPublicOrigin, originDiagnostics } from "@/lib/espn";
+import { getYahooIngest, setYahooIngest, clearYahooIngest, type YahooIngestPayload } from "@/lib/yahoo-ingest";
+import { isAllowedYahooHref, normalizeYahooPicks, yahooToDraftPicks } from "@/lib/yahoo";
+import { buildYahooBookmarklet } from "@/lib/yahoo-bookmarklet";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+function cors(req: Request, body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: ingestCorsHeaders(req) });
+}
+
+function mapped(current: YahooIngestPayload | null) {
+  const teams = current?.meta?.teams ?? 12;
+  const draftType = current?.meta?.draftType ?? "snake";
+  const result = yahooToDraftPicks(current?.picks ?? [], teams, draftType);
+  return { draftPicks: result.picks, unmatched: result.unmatched };
+}
+
+function responseState(current: YahooIngestPayload | null) {
+  return {
+    picks: current?.picks ?? [],
+    count: current?.picks.length ?? 0,
+    ...mapped(current),
+    ts: current?.ts ?? null,
+    href: current?.href,
+    title: current?.title,
+    meta: current?.meta,
+  };
+}
+
+export async function OPTIONS(req: Request) {
+  return new NextResponse(null, { status: 204, headers: ingestCorsHeaders(req) });
+}
+
+export async function GET(req: Request) {
+  const current = getYahooIngest();
+  const publicOrigin = requestPublicOrigin(req);
+  const diag = originDiagnostics(req);
+  return cors(req, {
+    ok: true,
+    ...responseState(current),
+    publicOrigin,
+    ingestUrl: `${publicOrigin}/api/yahoo/ingest`,
+    bookmarklet: buildYahooBookmarklet(`${publicOrigin}/api/yahoo/ingest`),
+    mode: "direct",
+    connected: Boolean(current && current.href !== "cleared" && Date.now() - current.ts < 180000),
+    configuredOrigin: diag.configuredOrigin,
+    requestHostOrigin: diag.requestHostOrigin,
+    loopbackRisk: diag.loopbackRisk,
+  });
+}
+
+export async function POST(req: Request) {
+  let body: {
+    picks?: unknown;
+    href?: unknown;
+    title?: unknown;
+    ts?: unknown;
+    meta?: YahooIngestPayload["meta"];
+  } = {};
+
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return cors(req, { ok: false, error: "Invalid JSON." }, 400);
+  }
+
+  const href = typeof body.href === "string" ? body.href : undefined;
+  if (href && href !== "paste" && !isAllowedYahooHref(href)) {
+    const previous = getYahooIngest();
+    return cors(req, {
+      ok: true,
+      ignoredForeign: true,
+      ...responseState(previous),
+      error: "Yahoo ingest only accepts yahoo.com pages or manual paste.",
+    });
+  }
+
+  const picks = normalizeYahooPicks(body.picks);
+  const previous = getYahooIngest();
+
+  if (!picks.length && previous?.picks.length && href !== "cleared") {
+    setYahooIngest({
+      ...previous,
+      href: href || previous.href,
+      title: typeof body.title === "string" ? body.title : previous.title,
+      ts: Date.now(),
+      meta: { ...previous.meta, ...body.meta },
+    });
+    const current = getYahooIngest();
+    return cors(req, { ok: true, heartbeat: true, ...responseState(current) });
+  }
+
+  if (href === "cleared") clearYahooIngest();
+  else {
+    setYahooIngest({
+      picks,
+      href,
+      title: typeof body.title === "string" ? body.title : undefined,
+      ts: typeof body.ts === "number" ? body.ts : Date.now(),
+      meta: body.meta,
+    });
+  }
+
+  const current = getYahooIngest();
+  return cors(req, { ok: true, ...responseState(current) });
+}

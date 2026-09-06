@@ -72,6 +72,7 @@ import type { DraftPick, DraftType, Injury, LeagueSettings, Player, Position } f
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { GapChip, InjuryDot, PlayerSubline, PosBadge } from "@/components/player-bits";
 import { EspnSync, type EspnLiveStatus } from "@/components/espn-sync";
+import { YahooSync } from "@/components/yahoo-sync";
 import { RanksLiveSyncPanel } from "@/components/ranks-live-sync";
 import { RelayPulse } from "@/components/relay-pulse";
 import { isLeftoverAgentRankSnapshot } from "@/lib/leftover-tests";
@@ -884,6 +885,9 @@ export function DraftApp() {
               onPicksFromEspn={applyEspnPicks}
               status={espn}
               setStatus={setEspn}
+            />
+            <YahooSync
+              onPicks={(nextPicks) => applyEspnPicks(nextPicks, dataRef.current.extras ?? [])}
             />
             <Button
               type="button"
