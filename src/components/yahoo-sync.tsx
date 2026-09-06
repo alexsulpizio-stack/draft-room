@@ -63,9 +63,8 @@ export function YahooSync({
     }
   };
 
-  const age = status.ts ? Math.max(0, Math.round((Date.now() - status.ts) / 1000)) : null;
   const health = status.connected
-    ? `Connected · ${status.count} picks${age == null ? "" : ` · ${age}s ago`}`
+    ? `Connected · ${status.count} picks`
     : error || "Waiting for Yahoo";
 
   return (
