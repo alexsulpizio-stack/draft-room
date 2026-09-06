@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ingestCorsHeaders, requestPublicOrigin, originDiagnostics } from "@/lib/espn";
 import { getYahooIngest, setYahooIngest, clearYahooIngest, type YahooIngestPayload } from "@/lib/yahoo-ingest";
 import { isAllowedYahooHref, normalizeYahooPicks, yahooToDraftPicks } from "@/lib/yahoo";
+import { pullYahooRelayIntoIngest, YAHOO_RELAY_URL } from "@/lib/yahoo-relay";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,6 +35,7 @@ export async function OPTIONS(req: Request) {
 }
 
 export async function GET(req: Request) {
+  await pullYahooRelayIntoIngest();
   const current = getYahooIngest();
   const publicOrigin = requestPublicOrigin(req);
   const diag = originDiagnostics(req);
@@ -42,6 +44,7 @@ export async function GET(req: Request) {
     ...responseState(current),
     publicOrigin,
     ingestUrl: `${publicOrigin}/api/yahoo/ingest`,
+    relayUrl: YAHOO_RELAY_URL,
     connected: Boolean(current && current.href !== "cleared" && Date.now() - current.ts < 180000),
     configuredOrigin: diag.configuredOrigin,
     requestHostOrigin: diag.requestHostOrigin,
