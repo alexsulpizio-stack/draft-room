@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ingestCorsHeaders, requestPublicOrigin, originDiagnostics } from "@/lib/espn";
-import { getYahooIngest, setYahooIngest, clearYahooIngest } from "@/lib/yahoo-ingest";
-import { isAllowedYahooHref, normalizeYahooPicks, type YahooRawPick } from "@/lib/yahoo";
+import { getYahooIngest, setYahooIngest, clearYahooIngest, type YahooIngestPayload } from "@/lib/yahoo-ingest";
+import { isAllowedYahooHref, normalizeYahooPicks } from "@/lib/yahoo";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
