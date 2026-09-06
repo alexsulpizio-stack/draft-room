@@ -24,6 +24,16 @@ function read(){
    if(!(overall>0)||!rest||seen.has(overall)||rest.length>60||rest.length<3) continue;
    seen.add(overall);rows.push({overall:overall,playerName:rest,pos:pos,nflTeam:nflTeam});
  }
+ if(!rows.length){
+  var lines=(document.body.innerText||"").split(/\\n+/).map(clean).filter(Boolean);
+  for(var j=0;j<lines.length;j++){
+   var lm=lines[j].match(/^(\\d{1,2})\\.(\\d{1,2})$/);if(!lm)continue;
+   var name="",k=j-1;
+   while(k>=0&&!name){var candidate=lines[k].replace(/\\b(QB|RB|WR|TE|K|DST)\\s*[·•-].*$/i,"").trim();if(candidate&&!/^Team \\d+$|^You$|^On the clock$/i.test(candidate)&&!/^\\d/.test(candidate))name=candidate;k--;}
+   var ov=(Number(lm[1])-1)*teams+Number(lm[2]);
+   if(name&&name.length>=3&&!seen.has(ov)){seen.add(ov);rows.push({overall:ov,playerName:name});}
+  }
+ }
  return rows.sort(function(a,b){return a.overall-b.overall;});
 }
 badge("scanning");
