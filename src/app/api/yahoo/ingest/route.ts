@@ -1,13 +1,32 @@
 import { NextResponse } from "next/server";
 import { ingestCorsHeaders, requestPublicOrigin, originDiagnostics } from "@/lib/espn";
 import { getYahooIngest, setYahooIngest, clearYahooIngest, type YahooIngestPayload } from "@/lib/yahoo-ingest";
-import { isAllowedYahooHref, normalizeYahooPicks } from "@/lib/yahoo";
+import { isAllowedYahooHref, normalizeYahooPicks, yahooToDraftPicks } from "@/lib/yahoo";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function cors(req: Request, body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: ingestCorsHeaders(req) });
+}
+
+function mapped(current: YahooIngestPayload | null) {
+  const teams = current?.meta?.teams ?? 12;
+  const draftType = current?.meta?.draftType ?? "snake";
+  const result = yahooToDraftPicks(current?.picks ?? [], teams, draftType);
+  return { draftPicks: result.picks, unmatched: result.unmatched };
+}
+
+function responseState(current: YahooIngestPayload | null) {
+  return {
+    picks: current?.picks ?? [],
+    count: current?.picks.length ?? 0,
+    ...mapped(current),
+    ts: current?.ts ?? null,
+    href: current?.href,
+    title: current?.title,
+    meta: current?.meta,
+  };
 }
 
 export async function OPTIONS(req: Request) {
@@ -20,12 +39,7 @@ export async function GET(req: Request) {
   const diag = originDiagnostics(req);
   return cors(req, {
     ok: true,
-    picks: current?.picks ?? [],
-    count: current?.picks.length ?? 0,
-    ts: current?.ts ?? null,
-    href: current?.href,
-    title: current?.title,
-    meta: current?.meta,
+    ...responseState(current),
     publicOrigin,
     ingestUrl: `${publicOrigin}/api/yahoo/ingest`,
     connected: Boolean(current && current.href !== "cleared" && Date.now() - current.ts < 180000),
@@ -56,7 +70,7 @@ export async function POST(req: Request) {
     return cors(req, {
       ok: true,
       ignoredForeign: true,
-      count: previous?.picks.length ?? 0,
+      ...responseState(previous),
       error: "Yahoo ingest only accepts yahoo.com pages or manual paste.",
     });
   }
@@ -72,7 +86,8 @@ export async function POST(req: Request) {
       ts: Date.now(),
       meta: { ...previous.meta, ...body.meta },
     });
-    return cors(req, { ok: true, heartbeat: true, count: previous.picks.length });
+    const current = getYahooIngest();
+    return cors(req, { ok: true, heartbeat: true, ...responseState(current) });
   }
 
   if (href === "cleared") clearYahooIngest();
@@ -87,5 +102,5 @@ export async function POST(req: Request) {
   }
 
   const current = getYahooIngest();
-  return cors(req, { ok: true, count: current?.picks.length ?? 0, ts: current?.ts ?? null });
+  return cors(req, { ok: true, ...responseState(current) });
 }
